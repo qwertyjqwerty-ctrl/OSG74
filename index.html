@@ -252,6 +252,425 @@
     </form>
   </div>
 
+  <!-- ===== ПЛАНИРОВЩИК ГРУЗОВОГО ПРОСТРАНСТВА (проверка LDM) ===== -->
+  <div id="pl-modal" class="hidden fixed inset-0 z-[45] bg-slate-900/60 backdrop-blur-sm p-2 sm:p-6 overflow-auto">
+    <div class="bg-white rounded-3xl shadow-2xl max-w-[1500px] mx-auto">
+      <div class="flex items-center justify-between gap-3 p-4 sm:p-5 border-b border-slate-200">
+        <div class="min-w-0">
+          <div class="text-lg font-extrabold text-slate-900 tracking-tight">Планировщик грузового пространства</div>
+          <div id="pl-title" class="text-xs font-semibold text-slate-400 truncate"></div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button type="button" onclick="plannerSave()" class="px-3.5 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-xs font-bold rounded-xl transition-all">Сохранить в базу</button>
+          <button type="button" onclick="plannerPrint()" class="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all">Печать</button>
+          <button type="button" onclick="closePlanner()" class="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-bold rounded-xl transition-all" title="Закрыть (Esc)">✕</button>
+        </div>
+      </div>
+
+      <div class="grid lg:grid-cols-[300px_1fr] gap-5 p-4 sm:p-5">
+        <!-- Левая колонка: настройки -->
+        <div class="space-y-4">
+          <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-3">
+            <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">1. Грузовое пространство</div>
+            <select id="pl-space" class="glass-input w-full p-2.5 rounded-xl text-sm font-bold text-slate-800"></select>
+            <div class="grid grid-cols-2 gap-2">
+              <label class="text-[10px] font-bold text-slate-400 uppercase">Длина, см<input type="number" id="pl-l" min="50" class="glass-input mt-1 w-full p-2 rounded-xl text-sm font-bold text-slate-800 text-right"></label>
+              <label class="text-[10px] font-bold text-slate-400 uppercase">Ширина, см<input type="number" id="pl-w" min="50" class="glass-input mt-1 w-full p-2 rounded-xl text-sm font-bold text-slate-800 text-right"></label>
+            </div>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-blue-50/60 border border-blue-100 space-y-2.5">
+            <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">2. Разместить груз</div>
+            <button type="button" onclick="plannerAuto()" class="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 transition-all">Разместить груз из калькулятора</button>
+            <button type="button" onclick="plannerClear()" class="w-full px-4 py-2.5 bg-white hover:bg-slate-50 text-slate-600 text-xs font-bold rounded-xl border border-slate-200 transition-all">Очистить план</button>
+          </div>
+
+          <div class="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+            <div class="text-[11px] font-bold text-slate-500 uppercase tracking-wider">3. Добавить место вручную</div>
+            <div class="grid grid-cols-4 gap-2">
+              <input type="number" id="pl-add-l" min="1" placeholder="Длина" class="glass-input p-2 rounded-xl text-sm font-bold text-slate-800 text-right">
+              <input type="number" id="pl-add-w" min="1" placeholder="Ширина" class="glass-input p-2 rounded-xl text-sm font-bold text-slate-800 text-right">
+              <input type="number" id="pl-add-h" min="0" placeholder="Высота" class="glass-input p-2 rounded-xl text-sm font-bold text-slate-800 text-right">
+              <input type="number" id="pl-add-q" min="1" value="1" class="glass-input p-2 rounded-xl text-sm font-bold text-slate-800 text-right" title="Количество">
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button type="button" onclick="plannerAddForm()" class="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-bold rounded-lg transition-all">Добавить (см)</button>
+              <button type="button" onclick="plannerAdd(120,80,0,1)" class="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200">+ Европаллет 120×80</button>
+              <button type="button" onclick="plannerAdd(120,100,0,1)" class="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 text-[11px] font-bold rounded-lg border border-slate-200">+ Паллет 120×100</button>
+            </div>
+          </div>
+          <p class="text-[11px] text-slate-400 leading-relaxed">Перетаскивайте места мышью или пальцем: они прилипают друг к другу и к стенкам, пересекаться не могут. <b>Правая кнопка</b> или <b>R</b> — повернуть, <b>Del</b> — удалить. Синяя пунктирная линия — занятая длина (LDM по плану).</p>
+        </div>
+
+        <!-- Правая колонка: схема и результаты -->
+        <div class="space-y-4 min-w-0">
+          <div id="pl-stale" class="hidden rounded-2xl border border-amber-200 bg-amber-50 text-amber-900 text-xs font-semibold p-3 flex items-center justify-between gap-3">
+            <span>Груз в калькуляторе изменился после построения плана.</span>
+            <button type="button" onclick="plannerAuto()" class="px-3 py-2 bg-white border border-amber-200 rounded-xl font-bold hover:bg-amber-100 shrink-0">Перестроить</button>
+          </div>
+          <div class="grid xl:grid-cols-[minmax(0,1fr)_330px] gap-4 items-start"><div class="space-y-4 min-w-0"><div class="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
+            <div id="pl-svg-wrap" style="min-width:640px"></div>
+          </div>
+          <div id="pl-sel-bar" class="hidden rounded-2xl bg-blue-50 border border-blue-200 p-3 flex items-center justify-between gap-3 text-xs">
+            <span id="pl-sel-text" class="font-bold text-blue-900"></span>
+            <span class="flex gap-2 shrink-0">
+              <button type="button" onclick="plannerRotate()" class="px-3 py-2 bg-white border border-blue-200 text-blue-700 font-bold rounded-xl hover:bg-blue-100">Повернуть (R)</button>
+              <button type="button" onclick="plannerDelete()" class="px-3 py-2 bg-white border border-rose-200 text-rose-600 font-bold rounded-xl hover:bg-rose-50">Удалить</button>
+            </span>
+          </div></div>
+          <div class="rounded-2xl border border-slate-200 overflow-hidden">
+            <div class="px-3 py-2.5 bg-slate-50 text-[11px] font-bold text-slate-500 uppercase tracking-wider">Грузы (номера как на схеме)</div>
+            <div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr class="text-[10px] text-slate-400 uppercase"><th class="p-2">№</th><th class="p-2 text-left">Д×Ш×В, см</th><th class="p-2">Шт</th><th class="p-2">Кант.</th><th class="p-2 text-left">Штабель на</th><th></th></tr></thead><tbody id="pl-rows"></tbody></table></div>
+            <p class="p-2.5 text-[10px] text-slate-400 leading-relaxed">«Кант.» — груз на боку: ширина и высота меняются местами. «Штабель на» — груз ставится сверху на выбранный номер и не занимает пол. При изменении план перестраивается.</p>
+          </div>
+          </div>
+
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div class="rounded-2xl border border-slate-200 p-4"><div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">LDM по габаритам</div><div id="pl-res-formula" class="text-2xl font-black text-slate-900 mt-1">0.00</div><div class="text-[11px] text-slate-400">формула калькулятора</div></div>
+            <div class="rounded-2xl border-2 border-blue-500 bg-blue-50/50 p-4"><div class="text-[10px] font-bold text-blue-600 uppercase tracking-wider">LDM по плану</div><div id="pl-res-plan" class="text-2xl font-black text-blue-700 mt-1">0.00</div><div class="text-[11px] text-slate-500">занятая длина кузова</div></div>
+            <div class="rounded-2xl border-2 border-emerald-500 bg-emerald-50/50 p-4"><div class="text-[10px] font-bold text-emerald-600 uppercase tracking-wider">LDM без пустот</div><div id="pl-res-net" class="text-2xl font-black text-emerald-700 mt-1">0.00</div><div id="pl-res-empty" class="text-[11px] text-slate-500">по занятой площади</div></div>
+            <div class="rounded-2xl border border-slate-200 p-4"><div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">LDM вручную</div><div id="pl-res-manual" class="text-2xl font-black text-slate-900 mt-1">—</div><div class="text-[11px] text-slate-400">пункт 3.1 калькулятора</div></div>
+          </div>
+          <div id="pl-verdict" class="rounded-2xl p-3.5 text-sm font-bold"></div>
+          <div id="pl-warn" class="space-y-1.5"></div>
+          <button type="button" onclick="plannerApplyLdm()" class="px-4 py-3 bg-white hover:bg-blue-50 text-blue-700 text-xs font-bold rounded-xl border-2 border-blue-200 transition-all">Подставить LDM плана в расчет (вместо ручного)</button>
+          <button type="button" onclick="plannerApplyLdm(1)" class="px-4 py-3 bg-white hover:bg-emerald-50 text-emerald-700 text-xs font-bold rounded-xl border-2 border-emerald-200 transition-all">Подставить LDM без пустот</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    var PRESETS = [['Фура 13,6 м', 1360, 245], ['Фура 13 м', 1300, 245], ['Фура 10 м', 1000, 245], ['Контейнер 20′', 590, 235], ['Контейнер 40′', 1203, 235], ['Свой размер', 0, 0]];
+    var COLORS = ['#bfdbfe', '#bbf7d0', '#fde68a', '#fbcfe8', '#ddd6fe', '#fed7aa', '#a5f3fc', '#e2e8f0'];
+    var P = fresh(), sel = null, nid = 1, drag = null;
+
+    function $(id) { return document.getElementById(id); }
+    function fresh() { return { sp: { p: 0, l: 1360, w: 245 }, rows: [], items: [], sig: '' }; }
+    function num(v, d) { var x = parseFloat(v); return isFinite(x) ? x : d; }
+    function r1(v) { return Math.round(v * 10) / 10; }
+    function rowOf(id) { for (var i = 0; i < P.rows.length; i++) if (P.rows[i].id === id) return P.rows[i]; return null; }
+    function find(id) { for (var i = 0; i < P.items.length; i++) if (P.items[i].id === id) return P.items[i]; return null; }
+    // Габариты места на полу; «кантовать» — ширина и высота меняются местами
+    function dm(r) { return (r.t && r.h > 0) ? { l: r.l, w: r.h, h: r.w } : { l: r.l, w: r.w, h: r.h }; }
+    function ex(it) { var d = dm(rowOf(it.ro)); return it.r ? d.w : d.l; }
+    function ey(it) { var d = dm(rowOf(it.ro)); return it.r ? d.l : d.w; }
+    function isOpen() { var m = $('pl-modal'); return m && !m.classList.contains('hidden'); }
+
+    function foot() {
+      var out = [];
+      (state.items || []).forEach(function (it, k) {
+        if (it.excludeLdm) return;
+        var f = unitToCm(it.unit), l = r1((parseFloat(it.length) || 0) * f), w = r1((parseFloat(it.width) || 0) * f),
+            h = r1((parseFloat(it.height) || 0) * f), c = Math.floor(parseFloat(it.count)) || 0;
+        if (l <= 0 || w <= 0 || c <= 0) return;
+        out.push({ k: k, l: l, w: w, h: h, s: effectiveStack(it), c: c });
+      });
+      return out;
+    }
+    function sig() { return foot().map(function (f) { return [f.k, f.l, f.w, f.s, f.c].join(':'); }).join('|'); }
+    function formulaLdm() { return foot().reduce(function (a, f) { return a + (f.l / 100) * (f.w / 100) / 2.4 * (f.c / f.s); }, 0); }
+    function used() { var m = 0; P.items.forEach(function (it) { m = Math.max(m, it.x + ex(it)); }); return m; }
+
+    // Таблица грузов: строки из калькулятора (№ как в калькуляторе) + добавленные вручную
+    function syncRows() {
+      var old = {}; P.rows.forEach(function (r) { if (r.k >= 0) old[r.k] = r; });
+      var man = P.rows.filter(function (r) { return r.k < 0; });
+      var calc = foot().map(function (f) {
+        var o = old[f.k];
+        return { id: o ? o.id : nid++, k: f.k, n: f.k + 1, l: f.l, w: f.w, h: f.h, c: f.c, s: f.s, t: o ? o.t : 0, on: o ? o.on : null };
+      });
+      P.rows = calc.concat(man);
+      P.rows.forEach(function (r) { if (r.on && !rowOf(r.on)) r.on = null; });
+    }
+
+    // Свободное место: кандидаты — края уже стоящих мест, места не пересекаются
+    function hit(x, y, a, b, skip) {
+      for (var i = 0; i < P.items.length; i++) {
+        var o = P.items[i];
+        if (o.id !== skip && x < o.x + ex(o) - 0.5 && o.x < x + a - 0.5 && y < o.y + ey(o) - 0.5 && o.y < y + b - 0.5) return true;
+      }
+      return false;
+    }
+    function spot(l, w) {
+      var W = P.sp.w, xs = { 0: 1 }, ys = { 0: 1 }, best = null;
+      P.items.forEach(function (o) { xs[r1(o.x + ex(o))] = 1; ys[r1(o.y + ey(o))] = 1; });
+      var X = Object.keys(xs).map(Number), Y = Object.keys(ys).map(Number);
+      [0, 1].forEach(function (r) {
+        var a = r ? w : l, b = r ? l : w;
+        if (b > W + 0.01) return;
+        X.forEach(function (x) { Y.forEach(function (y) {
+          if (y + b > W + 0.01 || hit(x, y, a, b, 0)) return;
+          var e = x + a;
+          if (!best || e < best.e - 0.01 || (Math.abs(e - best.e) < 0.01 && (x < best.x || (x === best.x && y < best.y)))) best = { x: x, y: y, r: r, e: e };
+        }); });
+      });
+      return best || { x: used(), y: 0, r: 0 };
+    }
+    function put(r) {
+      var d = dm(r), fp = Math.min(300, Math.ceil(r.c / r.s)), s;
+      for (var i = 0; i < fp; i++) { s = spot(d.l, d.w); P.items.push({ id: nid++, ro: r.id, x: s.x, y: s.y, r: s.r }); }
+    }
+    function autoPlace() {
+      syncRows(); P.items = [];
+      P.rows.filter(function (r) { return !r.on; }).sort(function (a, b) {
+        var da = dm(a), db = dm(b);
+        return Math.max(db.l, db.w) - Math.max(da.l, da.w) || Math.min(db.l, db.w) - Math.min(da.l, da.w);
+      }).forEach(put);
+      P.sig = sig(); sel = null;
+    }
+
+    function bad() {
+      var res = {}, L = P.sp.l, W = P.sp.w, it = P.items, i, j;
+      for (i = 0; i < it.length; i++) {
+        var a = it[i];
+        if (a.x + ex(a) > L + 0.5 || a.y + ey(a) > W + 0.5 || a.y < -0.5) res[a.id] = 'out';
+        for (j = i + 1; j < it.length; j++) {
+          var b = it[j];
+          if (a.x < b.x + ex(b) - 0.5 && b.x < a.x + ex(a) - 0.5 && a.y < b.y + ey(b) - 0.5 && b.y < a.y + ey(a) - 0.5) { res[a.id] = res[a.id] || 'hit'; res[b.id] = res[b.id] || 'hit'; }
+        }
+      }
+      return res;
+    }
+
+    function svgHtml(forPrint) {
+      var s = P.sp, L = s.l, W = s.w, xe = used(), xm = Math.max(L, xe), b = bad(), h = '', cnt = {};
+      h += '<svg id="' + (forPrint ? 'pl-svg-p' : 'pl-svg') + '" xmlns="http://www.w3.org/2000/svg" viewBox="-75 -35 ' + (xm + 115) + ' ' + (W + 95) + '" style="width:100%;height:auto;display:block;touch-action:none;user-select:none;font-family:sans-serif">';
+      h += '<rect x="-68" y="' + W * 0.18 + '" width="60" height="' + W * 0.64 + '" rx="10" fill="#cbd5e1"/><text x="-38" y="' + (W / 2 + 5) + '" font-size="14" text-anchor="middle" fill="#475569">кабина</text>';
+      h += '<rect x="0" y="0" width="' + L + '" height="' + W + '" fill="#f8fafc" stroke="#475569" stroke-width="3"/>';
+      if (xm > L) h += '<rect x="' + L + '" y="0" width="' + (xm - L) + '" height="' + W + '" fill="#fee2e2" opacity=".6"/>';
+      for (var m = 100; m < xm; m += 100) h += '<line x1="' + m + '" y1="0" x2="' + m + '" y2="' + W + '" stroke="#e2e8f0" stroke-width="1.5"/>';
+      for (m = 0; m <= xm; m += 100) h += '<text x="' + m + '" y="' + (W + 22) + '" font-size="15" text-anchor="middle" fill="#64748b">' + (m / 100) + ' м</text>';
+      P.items.forEach(function (it) {
+        var r = rowOf(it.ro), a = ex(it), c = ey(it), isBad = b[it.id], isSel = sel === it.id, idx = cnt[r.id] = (cnt[r.id] || 0) + 1;
+        h += '<g data-id="' + it.id + '" style="cursor:grab"><rect x="' + it.x + '" y="' + it.y + '" width="' + a + '" height="' + c + '" fill="' + (isBad ? '#fecaca' : COLORS[r.n % 8]) +
+             '" stroke="' + (isSel ? '#2563eb' : isBad ? '#dc2626' : '#475569') + '" stroke-width="' + (isSel ? 5 : 2) + '"/>';
+        var fs = Math.max(9, Math.min(26, Math.min(a, c) / 4)), cx = it.x + a / 2, cy = it.y + c / 2;
+        var lab = '№' + r.n + (r.t ? ' ⟳' : '');
+        P.rows.forEach(function (q) { if (q.on === r.id && idx <= q.c) lab += ' +№' + q.n; });
+        var two = c >= fs * 2.6 && a >= fs * 3;
+        h += '<text x="' + cx + '" y="' + (two ? cy - fs * 0.1 : cy + fs * 0.35) + '" font-size="' + fs + '" font-weight="800" text-anchor="middle" fill="#0f172a" style="pointer-events:none">' + lab + '</text>';
+        if (two) { var d = dm(r); h += '<text x="' + cx + '" y="' + (cy + fs * 1.15) + '" font-size="' + fs * 0.75 + '" text-anchor="middle" fill="#334155" style="pointer-events:none">' + Math.round(d.l) + '×' + Math.round(d.w) + (r.s > 1 ? ' · ' + r.s + ' яр.' : '') + '</text>'; }
+        h += '</g>';
+      });
+      if (xe > 0) h += '<line x1="' + xe + '" y1="-14" x2="' + xe + '" y2="' + (W + 6) + '" stroke="#2563eb" stroke-width="3" stroke-dasharray="9 6"/><text x="' + xe + '" y="-18" font-size="17" font-weight="700" text-anchor="middle" fill="#2563eb">' + (xe / 100).toFixed(2) + ' LDM</text>';
+      return h + '</svg>';
+    }
+
+    function tbl() {
+      var h = '';
+      P.rows.forEach(function (r) {
+        var dep = P.rows.some(function (q) { return q.on === r.id; }), opts = '<option value="">на пол</option>';
+        if (!dep) P.rows.forEach(function (x) { if (x !== r && !x.on) opts += '<option value="' + x.id + '"' + (r.on === x.id ? ' selected' : '') + '>на №' + x.n + '</option>'; });
+        h += '<tr class="border-t border-slate-100"><td class="p-2 text-center"><span style="background:' + COLORS[r.n % 8] + '" class="inline-block min-w-[26px] px-1.5 py-0.5 rounded-md font-extrabold text-slate-800 border border-slate-300">' + r.n + '</span></td>' +
+          '<td class="p-2 font-medium text-slate-600 whitespace-nowrap">' + Math.round(r.l) + '×' + Math.round(r.w) + '×' + (r.h ? Math.round(r.h) : '?') + '</td><td class="p-2 text-center font-bold">' + r.c + '</td>' +
+          '<td class="p-2 text-center"><input type="checkbox" data-t="' + r.id + '"' + (r.t ? ' checked' : '') + (r.h > 0 ? '' : ' disabled title="Не указана высота"') + '></td>' +
+          '<td class="p-2"><select data-on="' + r.id + '" class="glass-input p-1 rounded-lg text-xs font-bold w-full">' + opts + '</select></td>' +
+          '<td class="p-2">' + (r.k < 0 ? '<button type="button" data-del="' + r.id + '" class="text-rose-500 font-bold" title="Удалить груз">✕</button>' : '') + '</td></tr>';
+      });
+      $('pl-rows').innerHTML = h || '<tr><td colspan="6" class="p-4 text-center text-slate-400">Нет грузов — нажмите «Разместить груз из калькулятора»</td></tr>';
+    }
+
+    // LDM без пустот: площадь занятых мест / 2,4 м; пустое место — площадь внутри занятой длины, не занятая грузом
+    function netInfo() {
+      var a = 0; P.items.forEach(function (it) { a += ex(it) * ey(it) / 10000; });
+      var strip = used() / 100 * P.sp.w / 100;
+      return { net: a / 2.4, empty: Math.max(0, strip - a) };
+    }
+
+    function info() {
+      var plan = used() / 100, f = formulaLdm(), man = Math.max(0, Number(state.manualLdmArea) || 0), ok = P.items.length > 0;
+      $('pl-res-formula').textContent = f.toFixed(2);
+      $('pl-res-plan').textContent = plan.toFixed(2);
+      $('pl-res-manual').textContent = man > 0 ? man.toFixed(2) : '—';
+      var nt = netInfo();
+      $('pl-res-net').textContent = nt.net.toFixed(2);
+      $('pl-res-empty').textContent = ok ? 'пустого места: ' + nt.empty.toFixed(2) + ' м²' : 'по занятой площади';
+      var v = $('pl-verdict'), cls, txt;
+      if (!ok) { cls = 'bg-slate-50 text-slate-500 border border-slate-200'; txt = 'План пуст. Нажмите «Разместить груз из калькулятора» или добавьте места вручную.'; }
+      else if (man > 0) {
+        var d = man - plan;
+        if (Math.abs(d) <= 0.1) { cls = 'bg-emerald-50 text-emerald-800 border border-emerald-200'; txt = '✓ Ручной LDM (' + man.toFixed(2) + ') совпадает с планом (' + plan.toFixed(2) + ').'; }
+        else if (d > 0) { cls = 'bg-amber-50 text-amber-900 border border-amber-200'; txt = 'Ручной LDM больше плана на ' + d.toFixed(2) + ' (ручной ' + man.toFixed(2) + ', по плану ' + plan.toFixed(2) + ').'; }
+        else { cls = 'bg-rose-50 text-rose-800 border border-rose-200'; txt = 'Ручной LDM меньше плана на ' + (-d).toFixed(2) + ' — по плану груз занимает больше места (' + plan.toFixed(2) + ').'; }
+      } else { cls = 'bg-blue-50 text-blue-900 border border-blue-200'; txt = 'Ручной LDM не введен — в расчете используется LDM по габаритам (' + f.toFixed(2) + '). По плану: ' + plan.toFixed(2) + '.'; }
+      if (ok) txt += ' Без пустот: ' + nt.net.toFixed(2) + (man > 0 ? ' (ручной ' + (man - nt.net >= 0 ? 'больше' : 'меньше') + ' на ' + Math.abs(man - nt.net).toFixed(2) + ').' : '.');
+      v.className = 'rounded-2xl p-3.5 text-sm font-bold ' + cls; v.textContent = txt;
+
+      var w = [], bd = bad(), hit2 = 0, out = 0;
+      Object.keys(bd).forEach(function (k) { if (bd[k] === 'hit') hit2++; else out++; });
+      if (hit2) w.push('Места пересекаются: ' + hit2 + ' шт. (подсвечены красным).');
+      if (out) w.push('Не помещаются в пространство ' + P.sp.l + '×' + P.sp.w + ' см: ' + out + ' шт.');
+      P.rows.forEach(function (r) {
+        var a = dm(r), x = r.on ? rowOf(r.on) : null;
+        if (!x) { if (a.h && a.h * r.s > TRUCK_HEIGHT_CM) w.push('№' + r.n + ': высота ' + Math.round(a.h * r.s) + ' см выше ' + TRUCK_HEIGHT_CM + ' см.'); return; }
+        var b2 = dm(x);
+        if (Math.min(a.l, a.w) > Math.min(b2.l, b2.w) + 0.5 || Math.max(a.l, a.w) > Math.max(b2.l, b2.w) + 0.5) w.push('№' + r.n + ' больше основания №' + x.n + ' по габаритам.');
+        if (r.c > x.c) w.push('№' + r.n + ': мест (' + r.c + ') больше, чем под ним в №' + x.n + ' (' + x.c + ').');
+        if (a.h && b2.h && a.h * r.s + b2.h * x.s > TRUCK_HEIGHT_CM) w.push('№' + r.n + ' на №' + x.n + ': высота ' + Math.round(a.h * r.s + b2.h * x.s) + ' см выше ' + TRUCK_HEIGHT_CM + ' см.');
+      });
+      $('pl-warn').innerHTML = w.map(function (t) { return '<div class="rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold p-2.5">⚠ ' + t + '</div>'; }).join('');
+
+      $('pl-stale').classList.toggle('hidden', !(P.rows.some(function (r) { return r.k >= 0; }) && P.sig !== sig()));
+      var it = sel != null ? find(sel) : null;
+      $('pl-sel-bar').classList.toggle('hidden', !it);
+      if (it) { var r = rowOf(it.ro); $('pl-sel-text').textContent = 'Выбрано: №' + r.n + ' · ' + Math.round(ex(it)) + '×' + Math.round(ey(it)) + ' см' + (it.r ? ' (повернуто)' : ''); }
+    }
+
+    function render() { $('pl-svg-wrap').innerHTML = svgHtml(false); info(); }
+    function hint() { var el = $('planner-ldm-hint'); if (el) el.textContent = P.items.length ? 'По плану: ' + (used() / 100).toFixed(2) + ' LDM · без пустот: ' + netInfo().net.toFixed(2) : ''; }
+    function touch() { render(); tbl(); hint(); if (typeof updateSessionBar === 'function') updateSessionBar(); }
+    function spaceUi() {
+      var sp = $('pl-space');
+      if (!sp.options.length) PRESETS.forEach(function (p, i) { var o = document.createElement('option'); o.value = i; o.textContent = p[0] + (p[1] ? ' — ' + p[1] + '×' + p[2] + ' см' : ''); sp.appendChild(o); });
+      sp.value = P.sp.p; $('pl-l').value = P.sp.l; $('pl-w').value = P.sp.w;
+    }
+    function rotate(it) {
+      it.r = it.r ? 0 : 1;
+      var y = Math.max(0, Math.min(it.y, P.sp.w - ey(it)));
+      if (hit(it.x, y, ex(it), ey(it), it.id)) { it.r = it.r ? 0 : 1; showToast('Нет места для поворота — освободите место рядом', true); return false; }
+      it.y = y; return true;
+    }
+
+    window.openPlanner = function () {
+      $('pl-modal').classList.remove('hidden'); document.body.style.overflow = 'hidden';
+      var n = typeof getSessionNumber === 'function' ? getSessionNumber() : '';
+      $('pl-title').textContent = 'Расчет' + (n ? ' № ' + n : '') + (state.selectedCity ? ' · ' + state.selectedCity : '');
+      if (!P.items.length && foot().length) autoPlace();
+      spaceUi(); render(); tbl(); hint();
+    };
+    window.closePlanner = function () { $('pl-modal').classList.add('hidden'); document.body.style.overflow = ''; drag = null; };
+    window.plannerAuto = function () {
+      if (!foot().length && !P.rows.length) { showToast('В калькуляторе нет мест с габаритами', true); return; }
+      autoPlace(); touch();
+    };
+    window.plannerClear = function () { if (P.items.length && !confirm('Очистить план и таблицу грузов?')) return; P.rows = []; P.items = []; P.sig = ''; sel = null; touch(); };
+    window.plannerAdd = function (l, w, h, q) {
+      var mx = (state.items || []).length; P.rows.forEach(function (r) { mx = Math.max(mx, r.n); });
+      var r = { id: nid++, k: -1, n: mx + 1, l: l, w: w, h: h || 0, c: q, s: 1, t: 0, on: null };
+      P.rows.push(r); put(r); touch();
+    };
+    window.plannerAddForm = function () {
+      var l = num($('pl-add-l').value, 0), w = num($('pl-add-w').value, 0), h = num($('pl-add-h').value, 0), q = Math.max(1, Math.floor(num($('pl-add-q').value, 1)));
+      if (l <= 0 || w <= 0) { showToast('Укажите длину и ширину места в см', true); return; }
+      window.plannerAdd(l, w, h, q);
+    };
+    window.plannerRotate = function () { var it = find(sel); if (it && rotate(it)) touch(); };
+    window.plannerDelete = function () { if (sel == null) return; P.items = P.items.filter(function (i) { return i.id !== sel; }); sel = null; touch(); };
+    window.plannerApplyLdm = function (net) {
+      var v = net ? netInfo().net : used() / 100;
+      if (v <= 0) { showToast('План пуст — нечего подставлять', true); return; }
+      var inp = $('manual-ldm-area'); inp.value = v.toFixed(2);
+      inp.dispatchEvent(new Event('input', { bubbles: true })); render();
+      showToast('LDM из плана (' + v.toFixed(2) + ') подставлен в расчет');
+    };
+    window.plannerSave = function () { if (typeof saveCurrentCalculation === 'function') saveCurrentCalculation(false); };
+    window.plannerPrint = function () {
+      if (!P.items.length) { showToast('План пуст', true); return; }
+      var w = window.open('', '_blank'); if (!w) { showToast('Браузер заблокировал окно печати', true); return; }
+      var n = typeof getSessionNumber === 'function' ? getSessionNumber() : '';
+      var t = P.rows.map(function (r) { var d = r.on ? rowOf(r.on) : null; return '<tr><td>' + r.n + '</td><td>' + Math.round(r.l) + '×' + Math.round(r.w) + '×' + Math.round(r.h) + '</td><td>' + r.c + '</td><td>' + (r.t ? 'кант.' : '') + '</td><td>' + (d ? 'на №' + d.n : '') + '</td></tr>'; }).join('');
+      w.document.write('<title>План размещения</title><body style="font-family:sans-serif;margin:20px"><h2 style="margin:0 0 4px">План размещения груза' + (n ? ' · расчет № ' + n : '') + '</h2><div style="color:#475569;font-size:13px;margin-bottom:10px">' +
+        P.sp.l + '×' + P.sp.w + ' см · LDM по плану: <b>' + (used() / 100).toFixed(2) + '</b> · без пустот: <b>' + netInfo().net.toFixed(2) + '</b> · LDM по габаритам: ' + formulaLdm().toFixed(2) + '</div>' + svgHtml(true) +
+        '<table border="1" cellpadding="4" style="border-collapse:collapse;margin-top:12px;font-size:12px"><tr><th>№</th><th>Д×Ш×В</th><th>Шт</th><th>Кант.</th><th>Штабель</th></tr>' + t + '</table></body>');
+      w.document.close(); w.focus(); setTimeout(function () { w.print(); }, 300);
+    };
+
+    window.plannerSnapshot = function () {
+      if (!P.items.length) return null;
+      return { sp: { p: P.sp.p, l: P.sp.l, w: P.sp.w }, sig: P.sig,
+        rows: P.rows.map(function (r) { return { id: r.id, k: r.k, n: r.n, l: r.l, w: r.w, h: r.h, c: r.c, s: r.s, t: r.t ? 1 : 0, on: r.on || null }; }),
+        items: P.items.map(function (i) { return { id: i.id, ro: i.ro, x: r1(i.x), y: r1(i.y), r: i.r ? 1 : 0 }; }) };
+    };
+    window.plannerRestore = function (d) {
+      P = fresh(); sel = null; nid = 1;
+      if (d && Array.isArray(d.items) && Array.isArray(d.rows)) {
+        var sp = d.sp || {};
+        P.sp = { p: Math.max(0, Math.min(5, Math.floor(num(sp.p, 0)))), l: num(sp.l, 1360) > 0 ? num(sp.l, 1360) : 1360, w: num(sp.w, 245) > 0 ? num(sp.w, 245) : 245 };
+        P.sig = String(d.sig || '');
+        P.rows = d.rows.map(function (r) {
+          var id = Math.floor(num(r.id, 0)) || nid; nid = Math.max(nid, id + 1);
+          return { id: id, k: Math.floor(num(r.k, -1)), n: Math.floor(num(r.n, 1)), l: num(r.l, 0), w: num(r.w, 0), h: num(r.h, 0), c: Math.max(1, Math.floor(num(r.c, 1))), s: Math.max(1, Math.floor(num(r.s, 1))), t: r.t ? 1 : 0, on: r.on ? Math.floor(num(r.on, 0)) : null };
+        }).filter(function (r) { return r.l > 0 && r.w > 0; });
+        P.items = d.items.map(function (i) {
+          var id = Math.floor(num(i.id, 0)) || nid; nid = Math.max(nid, id + 1);
+          return { id: id, ro: Math.floor(num(i.ro, 0)), x: num(i.x, 0), y: num(i.y, 0), r: i.r ? 1 : 0 };
+        }).filter(function (i) { return rowOf(i.ro); });
+      }
+      hint(); if (isOpen()) { spaceUi(); render(); tbl(); }
+    };
+    window.plannerReset = function () { window.plannerRestore(null); };
+
+    // ---- события ----
+    function svgPt(e) { var svg = $('pl-svg'), p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); }
+    function mag(v, size, edges) {
+      var best = v, bd = 10;
+      edges.forEach(function (e) { [e, e - size].forEach(function (c) { var d = Math.abs(v - c); if (d < bd) { bd = d; best = c; } }); });
+      return best === v ? Math.round(v / 5) * 5 : best;
+    }
+    document.addEventListener('pointerdown', function (e) {
+      if (!isOpen() || !e.target.closest || e.button !== 0) return;
+      var g = e.target.closest('#pl-svg g[data-id]');
+      if (!g) { if (e.target.closest('#pl-svg')) { sel = null; render(); } return; }
+      var it = find(+g.getAttribute('data-id')); if (!it) return;
+      sel = it.id; var p = svgPt(e); drag = { it: it, ox: p.x - it.x, oy: p.y - it.y, moved: false };
+      e.preventDefault(); render();
+    });
+    document.addEventListener('pointermove', function (e) {
+      if (!drag) return;
+      var p = svgPt(e), it = drag.it, a = ex(it), b = ey(it), xs = [0, P.sp.l], ys = [0, P.sp.w];
+      P.items.forEach(function (o) { if (o !== it) { xs.push(o.x, o.x + ex(o)); ys.push(o.y, o.y + ey(o)); } });
+      var nx = Math.max(0, mag(p.x - drag.ox, a, xs)), ny = Math.max(0, Math.min(mag(p.y - drag.oy, b, ys), Math.max(0, P.sp.w - b)));
+      // Пересекаться нельзя: если новая позиция занята, пробуем сдвиг по одной оси, иначе остаёмся на месте
+      if (!hit(nx, ny, a, b, it.id)) { it.x = nx; it.y = ny; }
+      else if (!hit(nx, it.y, a, b, it.id)) it.x = nx;
+      else if (!hit(it.x, ny, a, b, it.id)) it.y = ny;
+      drag.moved = true; render();
+    });
+    document.addEventListener('pointerup', function () { if (!drag) return; var m = drag.moved; drag = null; if (m) touch(); });
+    document.addEventListener('contextmenu', function (e) {
+      if (!isOpen() || !e.target.closest || !e.target.closest('#pl-svg')) return;
+      e.preventDefault();
+      var g = e.target.closest('g[data-id]'); if (!g) return;
+      var it = find(+g.getAttribute('data-id')); if (!it) return;
+      sel = it.id; drag = null; rotate(it); touch();
+    });
+    document.addEventListener('keydown', function (e) {
+      if (!isOpen()) return;
+      if (e.key === 'Escape') { closePlanner(); return; }
+      var t = e.target && e.target.tagName;
+      if (t === 'INPUT' || t === 'SELECT' || t === 'TEXTAREA') return;
+      if (e.key === 'r' || e.key === 'R' || e.key === 'к' || e.key === 'К') { e.preventDefault(); plannerRotate(); }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); plannerDelete(); }
+    });
+    $('pl-rows').addEventListener('change', function (e) {
+      var t = e.target, id;
+      if (t.hasAttribute('data-t')) { rowOf(+t.getAttribute('data-t')).t = t.checked ? 1 : 0; autoPlace(); touch(); }
+      else if (t.hasAttribute('data-on')) { rowOf(+t.getAttribute('data-on')).on = t.value ? +t.value : null; autoPlace(); touch(); }
+    });
+    $('pl-rows').addEventListener('click', function (e) {
+      var d = e.target.getAttribute && e.target.getAttribute('data-del'); if (!d) return;
+      var id = +d; P.rows = P.rows.filter(function (r) { return r.id !== id; }); P.items = P.items.filter(function (i) { return i.ro !== id; });
+      P.rows.forEach(function (r) { if (r.on === id) r.on = null; }); sel = null; touch();
+    });
+    $('pl-space').addEventListener('change', function (e) {
+      var i = +e.target.value, p = PRESETS[i]; P.sp.p = i;
+      if (p[1]) { P.sp.l = p[1]; P.sp.w = p[2]; }
+      spaceUi(); touch();
+    });
+    ['pl-l', 'pl-w'].forEach(function (id) {
+      $(id).addEventListener('change', function () {
+        var l = num($('pl-l').value, 0), w = num($('pl-w').value, 0);
+        if (l < 50 || w < 50) { spaceUi(); return; }
+        P.sp.l = l; P.sp.w = w;
+        var pi = 5; PRESETS.forEach(function (p, i) { if (p[1] === l && p[2] === w) pi = i; });
+        P.sp.p = pi; spaceUi(); touch();
+      });
+    });
+  })();
+  </script>
+
   <div id="toast" class="hidden fixed bottom-6 right-6 z-50 max-w-sm px-4 py-3 rounded-2xl shadow-xl text-sm font-bold text-white bg-slate-900"></div>
 
   <!-- Вкладка: Справочник тарифов -->
@@ -396,6 +815,10 @@
           <h2 class="text-xl font-bold text-slate-900 tracking-tight">Габариты и параметры мест</h2>
         </div>
         <div class="flex items-center gap-2">
+          <button type="button" id="btn-planner" onclick="openPlanner()" class="text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-xl shadow-md shadow-blue-500/20 transition-all inline-flex items-center gap-1.5">
+            <i data-lucide="layout-grid" class="w-4 h-4"></i>
+            Планировщик
+          </button>
           <button id="btn-example" class="text-xs font-semibold text-slate-600 hover:text-blue-600 bg-slate-100 hover:bg-blue-50 px-3.5 py-2 rounded-xl border border-slate-200 transition-all">
             Пример текста
           </button>
@@ -482,12 +905,19 @@
             <i data-lucide="layout-grid" class="w-5 h-5"></i>
           </div>
         </div>
-        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">LDM по площади</p>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider">LDM по площади <span id="ldm-area-manual-badge" class="hidden ml-1 normal-case tracking-normal text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-200 px-1.5 py-0.5 rounded-md">введено вручную</span></p>
         <div class="mt-2 flex items-baseline justify-between">
           <span class="text-3xl font-black text-slate-900 tracking-tight" id="res-ldm-area">0.00</span>
           <span class="text-xs font-bold text-slate-400">м.п. (LDM)</span>
         </div>
-        <p class="text-[11px] text-slate-400 mt-2">С учетом ярусности</p>
+        <p id="ldm-area-caption" class="text-[11px] text-slate-400 mt-2">С учетом ярусности</p>
+        <div class="mt-3 flex items-center gap-2">
+          <label for="manual-ldm-area" class="sr-only">LDM вручную</label>
+          <input type="number" id="manual-ldm-area" min="0" step="0.01" placeholder="Ввести вручную" class="glass-input flex-1 min-w-0 p-2 rounded-xl text-sm font-bold text-slate-800 text-right">
+          <button type="button" id="manual-ldm-reset" class="hidden px-2.5 py-2 text-[11px] font-bold rounded-xl bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Сбросить</button>
+        </div>
+        <button type="button" onclick="openPlanner()" class="mt-2 w-full px-3 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-md shadow-blue-500/20 transition-all">Планировщик — проверить LDM</button>
+        <p id="planner-ldm-hint" class="text-[11px] font-bold text-blue-600 mt-1.5 min-h-[1rem]"></p>
       </div>
 
       <!-- LDM по весу -->
@@ -1096,6 +1526,7 @@
       usdBaseRate: 88.10,
       usdRate: 88.10,
       firstMileCNY: 0,
+      manualLdmArea: 0,       // LDM по площади, введенный вручную (0 — считается по габаритам)
       firstMilePct: 5,        // процент конвертации юаней (надбавка к курсу ЦБ), задается вручную
       manualTotalWeight: 0,
       calcType: 'ldm', 
@@ -1747,6 +2178,18 @@
       const bulkInput = document.getElementById('bulk-input');
       if (bulkInput) bulkInput.addEventListener('input', autoParseBulkInput);
 
+      const manualLdmInput = document.getElementById('manual-ldm-area');
+      if (manualLdmInput) manualLdmInput.addEventListener('input', () => {
+        state.manualLdmArea = Math.max(0, parseFloat(manualLdmInput.value) || 0);
+        calculateAll();
+      });
+      const manualLdmReset = document.getElementById('manual-ldm-reset');
+      if (manualLdmReset) manualLdmReset.addEventListener('click', () => {
+        state.manualLdmArea = 0;
+        if (manualLdmInput) manualLdmInput.value = '';
+        calculateAll();
+      });
+
       const tdStep = (d) => {
         const inp = document.getElementById('additional-td-input');
         if (!inp) return;
@@ -1898,7 +2341,7 @@
     }
 
     function applyCeilingStack(item) {
-      const factorToCm = item.unit === 'mm' ? 0.1 : 1;
+      const factorToCm = unitToCm(item.unit);
       const heightCm = (parseFloat(item.height) || 0) * factorToCm;
       const maxByHeight = heightCm > 0 ? Math.max(1, Math.floor(TRUCK_HEIGHT_CM / heightCm)) : 1;
       const maxByCount = Math.max(1, Math.floor(parseFloat(item.count)) || 1);
@@ -1973,6 +2416,10 @@
 
     // Очистка пункта 4 (доставка по Китаю): сумма в юанях и процент конвертации по умолчанию
     function clearSection4Data() {
+      // заодно сбрасываем LDM, введенный вручную (пункт 3.1)
+      state.manualLdmArea = 0;
+      const mld = document.getElementById('manual-ldm-area');
+      if (mld) mld.value = '';
       state.firstMileCNY = 0;
       state.firstMilePct = 5;
       const cny = document.getElementById('first-mile-cny');
@@ -2000,6 +2447,31 @@
         if (usd) usd.value = '';
       });
     }
+
+    // Единицы габаритов: мм, см, м. Значения переводятся в метры (для LDM/объема) и в см (для высоты в стеке)
+    function unitToMeters(u) { return u === 'mm' ? 0.001 : (u === 'm' ? 1 : 0.01); }
+    function unitToCm(u) { return u === 'mm' ? 0.1 : (u === 'm' ? 100 : 1); }
+
+    // Какая единица у строки с габаритами:
+    // явное слово (мм / см / м) важнее всего; затем дробные числа до 10 (1.2 — это метры);
+    // затем крупные числа (больше 300 — миллиметры, например 1200х800); иначе сантиметры (60х10)
+    function detectUnit(line, rawDims) {
+      const L = 'А-Яа-яЁёA-Za-z';
+      if (new RegExp(`(?:^|[^${L}])(?:мм|mm)(?![${L}])`, 'i').test(line)) return 'mm';
+      if (new RegExp(`(?:^|[^${L}])(?:см|cm)(?![${L}])`, 'i').test(line)) return 'cm';
+      if (new RegExp(`(?:^|[^${L}])(?:м|m)(?![${L}])`, 'i').test(line)) return 'm';
+      const nums = rawDims.map(d => parseFloat(String(d).replace(',', '.')) || 0);
+      const max = Math.max(...nums);
+      const hasDecimal = rawDims.some(d => /[.,]/.test(String(d)));
+      if (hasDecimal && max <= 10) return 'm';
+      if (max > 300) return 'mm';
+      return 'cm';
+    }
+
+    // Слова, которые означают не количество мест, а вес или единицу измерения
+    // (слова ярусов тоже здесь: «в 2 яруса», «3 ряда», «2 tiers» — это этажность, а не количество мест)
+    const UNIT_WORD_RE = /^(кг|kg|kgs|т|t|тн|тонн|см|cm|мм|mm|м|m|л|l|г|g|ярус[а-яё]*|ряд[а-яё]*|слой|слоя|слоев|tiers?|layers?|levels?|rows?|high)$/i;
+    const WEIGHT_CTX_RE = /вес|масса|брутто|нетто|weight|gross|net/i;
 
     function autoParseBulkInput() {
       const bulkField = document.getElementById('bulk-input');
@@ -2042,22 +2514,46 @@
         const cleanLine = line.trim();
         if (!cleanLine) return;
 
-        // Сначала габариты: числа внутри размеров (800 в 800*970*750) не должны попадать в количество мест
+        // Габариты: сначала цепочка из четырех чисел («2х120х120х30» — первое число количество, если оно меньше следующего),
+        // затем три размера («120*120*30»), затем два размера («1200х800», высота не задана)
         let length = 0, width = 0, height = 0;
         let beforeDims = '';          // текст перед габаритами
         let lineNoDims = cleanLine;   // строка без габаритов (для поиска количества и веса)
+        let leadingCount = null;      // количество, записанное первым в цепочке
+        let twoDims = false;          // заданы только длина и ширина
+        let rawDims = [];             // строки размеров (для определения единиц и дробных значений)
+        let dimIndex = -1, dimLen = 0;
+        const NUM = '(\\d+(?:[.,]\\d+)?)';
+        const SEP = '\\s*[хx*×]\\s*';
+        const chain4 = cleanLine.match(new RegExp(`${NUM}${SEP}${NUM}${SEP}${NUM}${SEP}${NUM}(?![\\d.,])`, 'i'));
         // Допускаются форматы вроде 25x30xH.20 (буква H перед высотой)
         const dimMatch = cleanLine.match(/(\d+(?:[.,]\d+)?)\s*[хx*×]\s*(\d+(?:[.,]\d+)?)\s*[хx*×]\s*[Hh]?\.?\s*(\d+(?:[.,]\d+)?)/i);
-        if (dimMatch) {
-          length = parseFloat(dimMatch[1].replace(',', '.'));
-          width = parseFloat(dimMatch[2].replace(',', '.'));
-          height = parseFloat(dimMatch[3].replace(',', '.'));
-          beforeDims = cleanLine.slice(0, dimMatch.index);
-          lineNoDims = beforeDims + ' ' + cleanLine.slice(dimMatch.index + dimMatch[0].length);
+        const twoMatch = cleanLine.match(new RegExp(`${NUM}${SEP}${NUM}(?![\\d.,])`, 'i'));
+
+        if (chain4 && /^\d+$/.test(chain4[1]) && parseFloat(chain4[1]) < parseFloat(chain4[2].replace(',', '.'))) {
+          leadingCount = parseInt(chain4[1], 10);
+          rawDims = [chain4[2], chain4[3], chain4[4]];
+          dimIndex = chain4.index; dimLen = chain4[0].length;
+        } else if (dimMatch) {
+          rawDims = [dimMatch[1], dimMatch[2], dimMatch[3]];
+          dimIndex = dimMatch.index; dimLen = dimMatch[0].length;
+        } else if (twoMatch) {
+          rawDims = [twoMatch[1], twoMatch[2]];
+          twoDims = true;
+          dimIndex = twoMatch.index; dimLen = twoMatch[0].length;
+        }
+
+        const hasDims = dimIndex >= 0;
+        if (hasDims) {
+          length = parseFloat(rawDims[0].replace(',', '.'));
+          width = parseFloat(rawDims[1].replace(',', '.'));
+          height = twoDims ? 0 : parseFloat(rawDims[2].replace(',', '.'));
+          beforeDims = cleanLine.slice(0, dimIndex);
+          lineNoDims = beforeDims + ' ' + cleanLine.slice(dimIndex + dimLen);
         }
 
         // ---- Строка без габаритов: общий вес партии либо вес предыдущего места ----
-        if (!dimMatch) {
+        if (!hasDims) {
           for (const re of TOTAL_WEIGHT_RES) {
             const m = cleanLine.match(re);
             if (m) {
@@ -2082,24 +2578,41 @@
           return;
         }
 
-        // Количество мест: по умолчанию 1, меняется только если указано явно —
-        // со словом ("3 ящика", "2 шт") или отдельным числом прямо перед габаритами ("3 120*120*30")
+        // Количество мест: по умолчанию 1. Порядок поиска:
+        // 1) цепочка «2х120х120х30»; 2) слово рядом («3 ящика», «2 шт», «3 упаковки», «4 мешка»);
+        // 3) число прямо перед габаритами («3 120*120*30», «3 - 120*120*30»);
+        // 4) число после габаритов через знак («120*120*30 *3», «120*120*30 х2»);
+        // 5) число со словом после габаритов («120*120*30 - 3 шт», «120х80х100 2 упаковки»)
         let count = 1;
-        const countMatch = lineNoDims.match(/(\d+)\s*(?:шт|штук|штуки|паллет|паллетомест|паллета|паллеты|ящик|ящиков|ящика|кор|коробок|коробка|коробки|мест|место|места|пм|груз|ед)/i) ||
-                           // английские слова: "1 PALLET", "2 pcs", "3 cartons", "1 NYLON PACK" (слова kg/cm/mm между числом и местом не считаются)
-                           lineNoDims.match(/(\d+)\s*(?:(?!kgs?\b|cm\b|mm\b)[a-z]+\s+)?(?:pallets?|plts?|pcs|pc|pieces?|packages?|pkgs?|packs?|boxes|box|cartons?|crates?|cases?|bags?|rolls?|drums?|bundles?|units?|items?)\b/i) ||
-                           beforeDims.match(/(?:^|\s)(\d+)\s*$/);
+        let countSet = false;
+        if (leadingCount !== null) { count = leadingCount; countSet = true; }
 
-        if (countMatch) {
-          count = parseInt(countMatch[1]) || 1;
+        if (!countSet) {
+          const countMatch = lineNoDims.match(/(\d+)\s*(?:шт|штук|штуки|паллет|паллетомест|паллета|паллеты|ящик|ящиков|ящика|кор|коробок|коробка|коробки|мест|место|места|пм|груз|ед)/i) ||
+                             // английские слова: "1 PALLET", "2 pcs", "3 cartons", "1 NYLON PACK" (слова kg/cm/mm между числом и местом не считаются)
+                             lineNoDims.match(/(\d+)\s*(?:(?!kgs?\b|cm\b|mm\b)[a-z]+\s+)?(?:pallets?|plts?|pcs|pc|pieces?|packages?|pkgs?|packs?|boxes|box|cartons?|crates?|cases?|bags?|rolls?|drums?|bundles?|units?|items?)\b/i);
+          if (countMatch) { count = parseInt(countMatch[1], 10) || 1; countSet = true; }
         }
 
-        let unit = 'cm';
-        if (/(?:мм|mm)\b/i.test(cleanLine)) {
-          unit = 'mm';
-        } else if (Math.max(length, width, height) > 300 && !/(?:см|cm)\b/i.test(cleanLine)) {
-          unit = 'mm';
+        if (!countSet && !WEIGHT_CTX_RE.test(beforeDims)) {
+          const bm = beforeDims.match(/(\d+)\s*(?:[-–—]\s*)?([А-Яа-яЁёA-Za-z]+\.?)?\s*$/);
+          if (bm && !(bm[2] && UNIT_WORD_RE.test(bm[2].replace('.', '')))) {
+            count = parseInt(bm[1], 10) || 1;
+            countSet = true;
+          }
         }
+
+        if (!countSet) {
+          const tx = lineNoDims.match(/(?:^|\s)[*хx×]\s*(\d+)(?![\d.,])/i);
+          if (tx) { count = parseInt(tx[1], 10) || 1; countSet = true; }
+        }
+
+        if (!countSet) {
+          const tw = lineNoDims.match(/(\d+)\s*([А-Яа-яЁёA-Za-z]+\.?)\s*$/);
+          if (tw && !UNIT_WORD_RE.test(tw[2].replace('.', ''))) count = parseInt(tw[1], 10) || 1;
+        }
+
+        const unit = detectUnit(cleanLine, rawDims);
 
         let stack = 1;
         let stackToCeiling = false;
@@ -2117,7 +2630,7 @@
         // Вес места = вес из строки / количество мест (если не указано "каждый", "по X кг" и т.п.)
         const weight = placeWeight(lineNoDims, count);
 
-        if (length > 0 && width > 0 && height > 0) {
+        if (length > 0 && width > 0 && (height > 0 || twoDims)) {
           const newItem = { count, length, width, height, unit, stack, stackToCeiling, excludeLdm, weight };
           if (stackToCeiling) applyCeilingStack(newItem);
           parsedItems.push(newItem);
@@ -2145,8 +2658,8 @@
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50/80 transition-colors";
 
-        const factor = item.unit === 'mm' ? 0.001 : 0.01;
-        const factorToCm = item.unit === 'mm' ? 0.1 : 1;
+        const factor = unitToMeters(item.unit);
+        const factorToCm = unitToCm(item.unit);
         const numCount = parseFloat(item.count) || 0;
         const numLen = parseFloat(item.length) || 0;
         const numWidth = parseFloat(item.width) || 0;
@@ -2179,6 +2692,7 @@
             <select data-idx="${index}" data-field="unit" class="item-input glass-input p-2 rounded-xl text-xs font-bold">
               <option value="cm" ${item.unit === 'cm' ? 'selected' : ''}>см</option>
               <option value="mm" ${item.unit === 'mm' ? 'selected' : ''}>мм</option>
+              <option value="m" ${item.unit === 'm' ? 'selected' : ''}>м</option>
             </select>
           </td>
           <td class="p-3.5">
@@ -2298,8 +2812,8 @@
       const item = state.items[index];
       if (!item) return;
 
-      const factor = item.unit === 'mm' ? 0.001 : 0.01;
-      const factorToCm = item.unit === 'mm' ? 0.1 : 1;
+      const factor = unitToMeters(item.unit);
+      const factorToCm = unitToCm(item.unit);
       const numCount = parseFloat(item.count) || 0;
       const numLen = parseFloat(item.length) || 0;
       const numWidth = parseFloat(item.width) || 0;
@@ -2854,7 +3368,7 @@
         const count = parseFloat(item.count) || 0;
         const weight = parseFloat(item.weight) || 0;
         const stack = effectiveStack(item);
-        const factorMeters = item.unit === 'mm' ? 0.001 : 0.01;
+        const factorMeters = unitToMeters(item.unit);
 
         const lenM = (parseFloat(item.length) || 0) * factorMeters;
         const widthM = (parseFloat(item.width) || 0) * factorMeters;
@@ -2876,11 +3390,19 @@
 
       const setElText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
 
-      setElText('res-ldm-area', totalLdmArea.toFixed(2));
+      // Пункт 3.1: LDM по площади можно ввести вручную — тогда он заменяет расчет по габаритам
+      const manualLdmArea = Math.max(0, Number(state.manualLdmArea) || 0);
+      const ldmAreaUsed = manualLdmArea > 0 ? manualLdmArea : totalLdmArea;
+      setElText('res-ldm-area', ldmAreaUsed.toFixed(2));
+      const manualBadge = document.getElementById('ldm-area-manual-badge');
+      if (manualBadge) manualBadge.classList.toggle('hidden', !(manualLdmArea > 0));
+      const manualReset = document.getElementById('manual-ldm-reset');
+      if (manualReset) manualReset.classList.toggle('hidden', !(manualLdmArea > 0));
+      setElText('ldm-area-caption', manualLdmArea > 0 ? `Введено вручную. По габаритам: ${totalLdmArea.toFixed(2)}` : 'С учетом ярусности');
       setElText('res-ldm-weight', totalLdmWeight.toFixed(2));
       setElText('res-total-volume', totalVolume.toFixed(2));
 
-      const billableLdm = Math.max(totalLdmArea, totalLdmWeight);
+      const billableLdm = Math.max(ldmAreaUsed, totalLdmWeight);
 
       // Юани → ₽: курс ЦБ × (1 + %) × сумма в юанях; $: то же в рублях / базовый курс USD
       const pctK = 1 + Math.max(0, state.firstMilePct || 0) / 100;
@@ -2976,7 +3498,7 @@
 
       setElText('summary-total-weight', effectiveTotalWeight > 0 ? `${effectiveTotalWeight.toLocaleString('ru-RU')} кг` : '0 кг');
       setElText('summary-total-vol', `${totalVolume.toFixed(2)} м³`);
-      setElText('summary-billable-ldm', `${billableLdm.toFixed(2)} LDM`);
+      setElText('summary-billable-ldm', `${billableLdm.toFixed(2)} LDM${(manualLdmArea > 0 && manualLdmArea >= totalLdmWeight) ? ' (вручную)' : ''}`);
 
       // Данные для блока «Расчет» в КП
       const usdBaseNow = state.usdBaseRate > 0 ? state.usdBaseRate : 0;
@@ -3101,6 +3623,7 @@
       const val = id => { const el = document.getElementById(id); return el ? el.value : ''; };
       return {
         bulkText: val('bulk-input'),
+        planner: (typeof window.plannerSnapshot === 'function' ? window.plannerSnapshot() : null),
         items: JSON.parse(JSON.stringify(state.items)),
         manualTotalWeight: state.manualTotalWeight,
         manualWeightFromText: state.manualWeightFromText,
@@ -3110,6 +3633,7 @@
         city: state.selectedCity,
         firstMileCNY: state.firstMileCNY,
         firstMilePct: state.firstMilePct,
+        manualLdmArea: state.manualLdmArea,
         additionalTD: state.additionalTD,
         additionalFees: { ...(state.additionalFees || {}) },
         extraPointQty: state.extraPointQty,
@@ -3149,7 +3673,7 @@
     }
 
     function hasCargo() {
-      return state.items.length > 0 || state.manualTotalWeight > 0;
+      return state.items.length > 0 || state.manualTotalWeight > 0 || state.manualLdmArea > 0;
     }
 
     // Есть ли в калькуляторе то, что пропадет при открытии другого расчета или «Новом расчете»
@@ -3269,7 +3793,7 @@
         length: n(it.length, 0),
         width: n(it.width, 0),
         height: n(it.height, 0),
-        unit: it.unit === 'mm' ? 'mm' : 'cm',
+        unit: (it.unit === 'mm' || it.unit === 'm') ? it.unit : 'cm',
         stack: n(it.stack, 1),
         stackToCeiling: !!it.stackToCeiling,
         excludeLdm: !!it.excludeLdm,
@@ -3313,6 +3837,7 @@
       state.firstMileCNY = num(d.firstMileCNY);
       // старые расчеты считались с +5%
       state.firstMilePct = d.firstMilePct === undefined ? 5 : Math.max(0, num(d.firstMilePct));
+      state.manualLdmArea = Math.max(0, num(d.manualLdmArea));
       state.additionalTD = num(d.additionalTD);
       state.additionalFees = { overrun: 0, assembly: 0, extra_point: 0, prr: 0, crane: 0, brand: 0, seal: 0, dangerous: 0, other: 0, ...(d.additionalFees || {}) };
       // новый формат (fees2): км / штуки / галочка; старые записи пересчитываем из рублей, чтобы сохранить сумму
@@ -3336,6 +3861,7 @@
       setVal('manual-total-weight', state.manualTotalWeight || '');
       setVal('first-mile-cny', state.firstMileCNY || '');
       setVal('first-mile-pct', state.firstMilePct);
+      setVal('manual-ldm-area', state.manualLdmArea || '');
       setVal('additional-td-input', state.additionalTD);
       Object.entries(state.additionalFees).forEach(([key, rub]) => {
         const rubEl = document.getElementById(`fee-${key}-rub`);
@@ -3377,6 +3903,7 @@
         issues.push(`Уровня «${escapeHtml(rec.summary.tier || wantTier)}» нет в справочнике — выбран «${escapeHtml(tierLabel(state.selectedTier))}».`);
       }
 
+      if (typeof window.plannerRestore === 'function') window.plannerRestore(d.planner);
       currentRecordId = rec.id;
       calculateAll();
       // Если всё нашлось — открытый расчет считается «чистым»; если нет — остаются несохраненные изменения
@@ -3455,6 +3982,7 @@
       clearSection7Data();
       clearSection4Data();
 
+      if (typeof window.plannerReset === 'function') window.plannerReset();
       currentRecordId = null;
       savedSnapshotJson = '';
       hideRestoreNotice();
