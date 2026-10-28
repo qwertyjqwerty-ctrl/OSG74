@@ -369,7 +369,7 @@
       });
       return out;
     }
-    function sig() { return foot().map(function (f) { return [f.k, f.l, f.w, f.s, f.c].join(':'); }).join('|'); }
+    function sig() { return foot().map(function (f) { return [f.k, f.l, f.w, f.h, f.s, f.c].join(':'); }).join('|'); }
     function formulaLdm() { return foot().reduce(function (a, f) { return a + (f.l / 100) * (f.w / 100) / 2.4 * (f.c / f.s); }, 0); }
     function used() { var m = 0; P.items.forEach(function (it) { m = Math.max(m, it.x + ex(it)); }); return m; }
 
@@ -447,15 +447,45 @@
         h += '<g data-id="' + it.id + '" style="cursor:grab"><rect x="' + it.x + '" y="' + it.y + '" width="' + a + '" height="' + c + '" fill="' + (isBad ? '#fecaca' : COLORS[r.n % 8]) +
              '" stroke="' + (isSel ? '#2563eb' : isBad ? '#dc2626' : '#475569') + '" stroke-width="' + (isSel ? 5 : 2) + '"/>';
         var fs = Math.max(9, Math.min(26, Math.min(a, c) / 4)), cx = it.x + a / 2, cy = it.y + c / 2;
+        var tr = tiers(r, idx);
+        if (tr > 1) {
+          h += '<rect x="' + (it.x + 5) + '" y="' + (it.y + 5) + '" width="' + Math.max(1, a - 10) + '" height="' + Math.max(1, c - 10) + '" fill="none" stroke="#475569" stroke-width="1.5" stroke-dasharray="5 3" style="pointer-events:none"/>';
+          var bw = fs * 3.4, bh = fs * 1.35;
+          if (a >= bw + 8 && c >= bh + 8) h += '<rect x="' + (it.x + a - bw - 4) + '" y="' + (it.y + 4) + '" width="' + bw + '" height="' + bh + '" rx="4" fill="#334155" style="pointer-events:none"/><text x="' + (it.x + a - bw / 2 - 4) + '" y="' + (it.y + 4 + bh * 0.72) + '" font-size="' + fs * 0.9 + '" font-weight="700" text-anchor="middle" fill="#fff" style="pointer-events:none">' + tr + ' яр.</text>';
+        }
         var lab = '№' + r.n + (r.t ? ' ⟳' : '');
         P.rows.forEach(function (q) { if (q.on === r.id && idx <= q.c) lab += ' +№' + q.n; });
         var two = c >= fs * 2.6 && a >= fs * 3;
         h += '<text x="' + cx + '" y="' + (two ? cy - fs * 0.1 : cy + fs * 0.35) + '" font-size="' + fs + '" font-weight="800" text-anchor="middle" fill="#0f172a" style="pointer-events:none">' + lab + '</text>';
-        if (two) { var d = dm(r); h += '<text x="' + cx + '" y="' + (cy + fs * 1.15) + '" font-size="' + fs * 0.75 + '" text-anchor="middle" fill="#334155" style="pointer-events:none">' + Math.round(d.l) + '×' + Math.round(d.w) + (r.s > 1 ? ' · ' + r.s + ' яр.' : '') + '</text>'; }
+        if (two) { var d = dm(r); h += '<text x="' + cx + '" y="' + (cy + fs * 1.15) + '" font-size="' + fs * 0.75 + '" text-anchor="middle" fill="#334155" style="pointer-events:none">' + Math.round(d.l) + '×' + Math.round(d.w) + '</text>'; }
         h += '</g>';
       });
       if (xe > 0) h += '<line x1="' + xe + '" y1="-14" x2="' + xe + '" y2="' + (W + 6) + '" stroke="#2563eb" stroke-width="3" stroke-dasharray="9 6"/><text x="' + xe + '" y="-18" font-size="17" font-weight="700" text-anchor="middle" fill="#2563eb">' + (xe / 100).toFixed(2) + ' LDM</text>';
       return h + '</svg>';
+    }
+
+    function tiers(r, idx) { var fp = Math.ceil(r.c / r.s); return (idx < fp || r.c % r.s === 0) ? r.s : r.c % r.s; }
+
+    // Вид сбоку (проекция на длину кузова): ярусы и грузы «на другом» стоят друг на друге
+    function sideHtml(forPrint) {
+      var L = P.sp.l, xm = Math.max(L, used()), H = TRUCK_HEIGHT_CM, cnt = {}, h = '';
+      var seq = P.items.map(function (it) { var r = rowOf(it.ro); cnt[r.id] = (cnt[r.id] || 0) + 1; return { it: it, r: r, idx: cnt[r.id] }; }).sort(function (a, b) { return a.it.y - b.it.y; });
+      h += '<svg id="pl-side' + (forPrint ? '-p' : '') + '" xmlns="http://www.w3.org/2000/svg" viewBox="-75 -30 ' + (xm + 115) + ' ' + (H + 60) + '" style="width:100%;height:auto;display:block;font-family:sans-serif">';
+      h += '<text x="-70" y="-10" font-size="15" font-weight="700" fill="#475569">Вид сбоку (высота, см)</text>';
+      h += '<rect x="0" y="0" width="' + L + '" height="' + H + '" fill="#f8fafc" stroke="#cbd5e1" stroke-width="2" stroke-dasharray="8 5"/>';
+      h += '<text x="' + (L - 4) + '" y="-6" font-size="14" text-anchor="end" fill="#dc2626">потолок ' + H + ' см</text>';
+      seq.forEach(function (q) {
+        var it = q.it, r = q.r, a = ex(it), top = 0, list = [];
+        for (var j = 0; j < tiers(r, q.idx); j++) list.push(r);
+        P.rows.forEach(function (d) { if (d.on === r.id && q.idx <= d.c) list.push(d); });
+        list.forEach(function (t) {
+          var d = dm(t), th = d.h > 0 ? d.h : 40, y = H - top - th;
+          h += '<rect x="' + it.x + '" y="' + y + '" width="' + a + '" height="' + th + '" fill="' + COLORS[t.n % 8] + '" fill-opacity=".85" stroke="' + (y < 0 ? '#dc2626' : '#475569') + '" stroke-width="2"' + (d.h > 0 ? '' : ' stroke-dasharray="4 3"') + '/>';
+          if (a >= 34 && th >= 14) h += '<text x="' + (it.x + a / 2) + '" y="' + (y + th / 2 + 5) + '" font-size="' + Math.min(16, th * 0.6) + '" font-weight="700" text-anchor="middle" fill="#0f172a">№' + t.n + '</text>';
+          top += th;
+        });
+      });
+      return h + '<line x1="0" y1="' + H + '" x2="' + xm + '" y2="' + H + '" stroke="#475569" stroke-width="3"/></svg>';
     }
 
     function tbl() {
@@ -518,8 +548,12 @@
       if (it) { var r = rowOf(it.ro); $('pl-sel-text').textContent = 'Выбрано: №' + r.n + ' · ' + Math.round(ex(it)) + '×' + Math.round(ey(it)) + ' см' + (it.r ? ' (повернуто)' : ''); }
     }
 
-    function render() { $('pl-svg-wrap').innerHTML = svgHtml(false); info(); }
-    function hint() { var el = $('planner-ldm-hint'); if (el) el.textContent = P.items.length ? 'По плану: ' + (used() / 100).toFixed(2) + ' LDM · без пустот: ' + netInfo().net.toFixed(2) : ''; }
+    function render() { $('pl-svg-wrap').innerHTML = svgHtml(false) + '<div style="height:10px"></div>' + sideHtml(false); info(); }
+    function hint() {
+      var el = $('planner-ldm-hint'); if (!el) return;
+      if (!P.items.length) { el.textContent = ''; return; }
+      el.textContent = (P.rows.some(function (r) { return r.k >= 0; }) && P.sig !== sig()) ? 'План устарел — откройте планировщик' : 'По плану: ' + (used() / 100).toFixed(2) + ' LDM · без пустот: ' + netInfo().net.toFixed(2);
+    }
     function touch() { render(); tbl(); hint(); if (typeof updateSessionBar === 'function') updateSessionBar(); }
     function spaceUi() {
       var sp = $('pl-space');
@@ -537,7 +571,7 @@
       $('pl-modal').classList.remove('hidden'); document.body.style.overflow = 'hidden';
       var n = typeof getSessionNumber === 'function' ? getSessionNumber() : '';
       $('pl-title').textContent = 'Расчет' + (n ? ' № ' + n : '') + (state.selectedCity ? ' · ' + state.selectedCity : '');
-      if (!P.items.length && foot().length) autoPlace();
+      if ((!P.items.length && foot().length) || P.sig !== sig()) autoPlace();
       spaceUi(); render(); tbl(); hint();
     };
     window.closePlanner = function () { $('pl-modal').classList.add('hidden'); document.body.style.overflow = ''; drag = null; };
@@ -572,7 +606,7 @@
       var n = typeof getSessionNumber === 'function' ? getSessionNumber() : '';
       var t = P.rows.map(function (r) { var d = r.on ? rowOf(r.on) : null; return '<tr><td>' + r.n + '</td><td>' + Math.round(r.l) + '×' + Math.round(r.w) + '×' + Math.round(r.h) + '</td><td>' + r.c + '</td><td>' + (r.t ? 'кант.' : '') + '</td><td>' + (d ? 'на №' + d.n : '') + '</td></tr>'; }).join('');
       w.document.write('<title>План размещения</title><body style="font-family:sans-serif;margin:20px"><h2 style="margin:0 0 4px">План размещения груза' + (n ? ' · расчет № ' + n : '') + '</h2><div style="color:#475569;font-size:13px;margin-bottom:10px">' +
-        P.sp.l + '×' + P.sp.w + ' см · LDM по плану: <b>' + (used() / 100).toFixed(2) + '</b> · без пустот: <b>' + netInfo().net.toFixed(2) + '</b> · LDM по габаритам: ' + formulaLdm().toFixed(2) + '</div>' + svgHtml(true) +
+        P.sp.l + '×' + P.sp.w + ' см · LDM по плану: <b>' + (used() / 100).toFixed(2) + '</b> · без пустот: <b>' + netInfo().net.toFixed(2) + '</b> · LDM по габаритам: ' + formulaLdm().toFixed(2) + '</div>' + svgHtml(true) + sideHtml(true) +
         '<table border="1" cellpadding="4" style="border-collapse:collapse;margin-top:12px;font-size:12px"><tr><th>№</th><th>Д×Ш×В</th><th>Шт</th><th>Кант.</th><th>Штабель</th></tr>' + t + '</table></body>');
       w.document.close(); w.focus(); setTimeout(function () { w.print(); }, 300);
     };
@@ -601,6 +635,31 @@
       hint(); if (isOpen()) { spaceUi(); render(); tbl(); }
     };
     window.plannerReset = function () { window.plannerRestore(null); };
+
+    // План принадлежит текущему расчету: пустой калькулятор — план очищен, груз изменился — план перестроен
+    (function () {
+      var orig = window.calculateAll, tm;
+      if (typeof orig !== 'function') return;
+      window.calculateAll = function () {
+        var res = orig.apply(this, arguments);
+        try {
+          var f = foot().length;
+          if (!f && P.rows.some(function (x) { return x.k >= 0; })) {
+            P.rows = P.rows.filter(function (x) { return x.k < 0; });
+            P.items = P.items.filter(function (i) { return rowOf(i.ro); });
+            P.sig = ''; sel = null; if (isOpen()) { render(); tbl(); }
+          } else if (f && P.items.length && P.sig !== sig() && !isOpen()) {
+            clearTimeout(tm);
+            tm = setTimeout(function () {
+              if (isOpen() || !P.items.length || P.sig === sig()) return;
+              autoPlace(); hint(); if (typeof updateSessionBar === 'function') updateSessionBar();
+            }, 400);
+          }
+          hint();
+        } catch (e) { /* планировщик не должен ломать калькулятор */ }
+        return res;
+      };
+    })();
 
     // ---- события ----
     function svgPt(e) { var svg = $('pl-svg'), p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); }
@@ -1123,7 +1182,7 @@
                   <input type="number" id="additional-td-input" min="0" step="1" value="1" placeholder="1" style="-moz-appearance:textfield;appearance:textfield" class="glass-input w-20 h-12 p-3 rounded-none border-x-0 font-extrabold text-slate-800 text-base text-center">
                   <button type="button" id="td-plus" class="w-10 h-12 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xl rounded-r-2xl border border-slate-200 transition-all select-none" title="Увеличить">+</button>
                 </div>
-                <span class="text-xs text-slate-400 font-medium leading-tight">шт. (1 в ставке)<br>доп. по 5 000 ₽: <span id="td-cost-display" class="font-bold text-slate-700">0 ₽</span></span>
+                <span class="text-xs text-slate-400 font-medium leading-tight">шт. (5 000 ₽ за первую всегда в доп. расходах)<br>доп. по 5 000 ₽: <span id="td-cost-display" class="font-bold text-slate-700">0 ₽</span></span>
               </div>
             </div>
 
@@ -1486,6 +1545,7 @@
 
     const TRUCK_HEIGHT_CM = 260;
     const TD_RATE_RUB = 5000;
+    const TD_BASE_RUB = 5000;   // всегда входит в доп. расходы (первая ТД); в мини-сводке «Расчет» не показывается
     const OVERRUN_RUB_PER_KM = 100;
     const EXTRA_POINT_RUB = 10000;
     const DANGEROUS_RUB = 15000;
@@ -2264,6 +2324,7 @@
       const btnClearAll = document.getElementById('btn-clear-all');
       if (btnClearAll) {
         btnClearAll.addEventListener('click', () => {
+          if (typeof window.plannerReset === 'function') window.plannerReset();
           state.items = [];
           state.manualTotalWeight = 0;
           state.manualWeightFromText = false;
@@ -3452,7 +3513,7 @@
       const mainUsdBase = state.usdBaseRate > 0 ? (mainLineRub / state.usdBaseRate) : 0;
       setElText('summary-main-line-usd', formatUSD(mainUsdBase));
 
-      // Первая ТД входит в ставку (в КП: «1 ТД»), каждая следующая — доплата
+      // Первая ТД: 5 000 ₽ всегда добавляются в доп. расходы (TD_BASE_RUB, без отдельной строки в мини-сводке). Каждая следующая ТД — доплата, она показывается
       const tdExtra = Math.max(0, Math.floor(state.additionalTD || 0) - 1);
       const tdCost = tdExtra * TD_RATE_RUB;
       setElText('td-cost-display', `${tdCost.toLocaleString('ru-RU')} ₽`);
@@ -3469,7 +3530,7 @@
       const feeKeys = ['overrun','assembly','extra_point','prr','crane','brand','seal','dangerous','other'];
       const feeRate = Math.max(0, state.usdBaseRate || 0);
       const brandRate = feeRate * (1 + Math.max(0, state.firstMilePct || 0) / 100);
-      const additionalFeesRub = feeKeys.reduce((sum, key) => sum + Math.max(0, Number(state.additionalFees?.[key]) || 0), 0);
+      const additionalFeesRub = TD_BASE_RUB + feeKeys.reduce((sum, key) => sum + Math.max(0, Number(state.additionalFees?.[key]) || 0), 0);
       const brandRub = Math.max(0, Number(state.additionalFees?.brand) || 0);
       const additionalFeesUsd = (feeRate > 0 ? (additionalFeesRub - brandRub) / feeRate : 0) + (brandRate > 0 ? brandRub / brandRate : 0);
       // В итог блока 7 входят и транзитные декларации (в смете они отдельной строкой, поэтому там не дублируем)
@@ -3532,8 +3593,8 @@
         carrier: state.selectedCarrier || '',
         cny: Math.max(0, state.firstMileCNY || 0),
         cnyRub: firstMileRubBase,
-        additionalRub: additionalFeesRub,
-        additionalUsd: additionalFeesUsd,
+        additionalRub: additionalFeesRub - TD_BASE_RUB,
+        additionalUsd: additionalFeesUsd - (feeRate > 0 ? TD_BASE_RUB / feeRate : 0),
         cnyUsd: usdBaseNow > 0 ? (firstMileRubBase / usdBaseNow) : 0,
         nettoRub: nettoRub,
         nettoUsd: usdBaseNow > 0 ? (nettoRub / usdBaseNow) : 0,
