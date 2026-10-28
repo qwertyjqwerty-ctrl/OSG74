@@ -693,7 +693,7 @@
                   <input type="number" id="additional-td-input" min="0" step="1" value="1" placeholder="1" style="-moz-appearance:textfield;appearance:textfield" class="glass-input w-20 h-12 p-3 rounded-none border-x-0 font-extrabold text-slate-800 text-base text-center">
                   <button type="button" id="td-plus" class="w-10 h-12 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xl rounded-r-2xl border border-slate-200 transition-all select-none" title="Увеличить">+</button>
                 </div>
-                <span class="text-xs text-slate-400 font-medium leading-tight">шт. × 5 000 ₽<br><span id="td-cost-display" class="font-bold text-slate-700">0 ₽</span></span>
+                <span class="text-xs text-slate-400 font-medium leading-tight">шт. (1 в ставке)<br>доп. по 5 000 ₽: <span id="td-cost-display" class="font-bold text-slate-700">0 ₽</span></span>
               </div>
             </div>
 
@@ -846,6 +846,14 @@
             <div class="flex justify-between items-center py-1">
               <span class="text-slate-500 font-medium">Брутто (+<span id="summary-brutto-percent">0</span>%):</span>
               <span class="font-bold text-slate-900" id="summary-brutto-raw">0 ₽</span>
+            </div>
+
+            <!-- Блок расчета для себя (не попадает в КП) -->
+            <div id="calc-summary-wrap" class="hidden mt-4">
+              <div class="flex justify-end mb-1">
+                <button type="button" id="calc-copy-btn" class="px-2.5 py-1 text-[11px] font-bold rounded-lg bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-colors">Скопировать</button>
+              </div>
+              <div id="calc-summary-block" class="p-4 rounded-2xl border border-slate-200 bg-slate-50 text-xs"></div>
             </div>
 
             <!-- Итоговый блок -->
@@ -2359,6 +2367,8 @@
     // ===================== Текст КП: правки, сохранение, сброс =====================
     const EMAIL_TEMPLATE_KEY = 'cargoCalc_kpText_v1';
     let emailDirty = false;
+    // Итоги последнего пересчета для блока КП «Расчет» (заполняет calculateAll)
+    let kpCalcView = null;
     let emailSaveTimer;
     let emailStatusTimer;
 
@@ -2459,6 +2469,8 @@
         }
       });
       syncLastmileSlot();
+      removeCalcFromEmail();
+      syncCalcSlot();
     }
 
     // Название оставлено прежним: функция вызывается из полей панели и при смене вкладки.
@@ -2918,7 +2930,9 @@
       const mainUsdBase = state.usdBaseRate > 0 ? (mainLineRub / state.usdBaseRate) : 0;
       setElText('summary-main-line-usd', formatUSD(mainUsdBase));
 
-      const tdCost = state.additionalTD * TD_RATE_RUB;
+      // Первая ТД входит в ставку (в КП: «1 ТД»), каждая следующая — доплата
+      const tdExtra = Math.max(0, Math.floor(state.additionalTD || 0) - 1);
+      const tdCost = tdExtra * TD_RATE_RUB;
       setElText('td-cost-display', `${tdCost.toLocaleString('ru-RU')} ₽`);
       setElText('summary-td-cost', `${tdCost.toLocaleString('ru-RU')} ₽`);
 
@@ -2963,6 +2977,49 @@
       setElText('summary-total-weight', effectiveTotalWeight > 0 ? `${effectiveTotalWeight.toLocaleString('ru-RU')} кг` : '0 кг');
       setElText('summary-total-vol', `${totalVolume.toFixed(2)} м³`);
       setElText('summary-billable-ldm', `${billableLdm.toFixed(2)} LDM`);
+
+      // Данные для блока «Расчет» в КП
+      const usdBaseNow = state.usdBaseRate > 0 ? state.usdBaseRate : 0;
+      let basisLabel = 'по LDM', basisDetail = '';
+      if (state.calcType === 'ldm') {
+        basisLabel = 'по LDM';
+        basisDetail = `${billableLdm.toFixed(2)} LDM × ${cityRates.ldm.toLocaleString('ru-RU')} ₽`;
+      } else if (state.calcType === 'vol') {
+        basisLabel = 'по объему';
+        basisDetail = `${totalVolume.toFixed(2)} м³ × ${cityRates.vol.toLocaleString('ru-RU')} ₽`;
+      } else {
+        basisLabel = 'по весу';
+        basisDetail = `${effectiveTotalWeight.toLocaleString('ru-RU')} кг × ${(cityRates.ldm / 1545).toFixed(2)} ₽`;
+      }
+      const feeLabelsKp = { overrun: 'Перепробег', assembly: 'Надбавка на сборку', extra_point: 'Доп. точка', prr: 'ПРР', crane: 'Кран', brand: 'Надбавка за бренд', seal: 'Пломба', dangerous: 'Опасный груз', other: 'Прочие расходы' };
+      const feeItemsKp = feeKeys.map(k => {
+        const r = Math.max(0, Number(state.additionalFees?.[k]) || 0);
+        if (r <= 0) return null;
+        const rate = k === 'brand' ? brandRate : feeRate;
+        let label = feeLabelsKp[k] || k;
+        if (k === 'overrun') label += ` ${Math.max(0, state.overrunKm || 0)} км`;
+        if (k === 'extra_point') label += ` ${Math.max(0, state.extraPointQty || 0)} шт.`;
+        return { label, rub: r, usd: rate > 0 ? (r / rate) : 0 };
+      }).filter(Boolean);
+      if (tdExtra > 0) {
+        feeItemsKp.push({ label: `Доп. ТД ${tdExtra} шт.`, rub: tdCost, usd: state.usdBaseRate > 0 ? (tdCost / state.usdBaseRate) : 0 });
+      }
+      kpCalcView = {
+        feeItems: feeItemsKp,
+        basisLabel, basisDetail,
+        carrier: state.selectedCarrier || '',
+        cny: Math.max(0, state.firstMileCNY || 0),
+        cnyRub: firstMileRubBase,
+        additionalRub: additionalFeesRub,
+        additionalUsd: additionalFeesUsd,
+        cnyUsd: usdBaseNow > 0 ? (firstMileRubBase / usdBaseNow) : 0,
+        nettoRub: nettoRub,
+        nettoUsd: usdBaseNow > 0 ? (nettoRub / usdBaseNow) : 0,
+        bruttoRub: bruttoRaw,
+        bruttoUsd: usdBaseNow > 0 ? (bruttoRaw / usdBaseNow) : 0,
+        lastMileRub: lastMileRub
+      };
+      syncCalcSlot();
 
       // Итоги последнего расчета — для записи в базу
       state.lastResult = {
@@ -3872,6 +3929,77 @@
       const before = innermost('Окончательная стоимость');
       if (before) { before.before(slot); return; }
       root.appendChild(slot);
+    }
+
+    // ---- Блок «Расчет» для себя: показывается в сводной смете калькулятора, в КП не попадает ----
+    // Название агента берется из названия варианта тарифа в справочнике («С Мамонтами» -> «Мамонты»)
+    const CARRIER_AGENT_NAMES = { 'С Мамонтами': 'Мамонты', 'С Юнхонгами': 'Юнхонги' };
+    function agentNameFromCarrier(name) {
+      if (!name) return '';
+      if (CARRIER_AGENT_NAMES[name]) return CARRIER_AGENT_NAMES[name];
+      return String(name).replace(/^С\s+/, '');
+    }
+
+    function buildCalcSlotHtml(v) {
+      const rub = n => `${Math.round(n).toLocaleString('ru-RU')} ₽`;
+      const rubUsd = (r, u) => `${rub(r)} / ${formatUSD(u)}`;
+      const agent = agentNameFromCarrier(v.carrier) || 'Агент не выбран';
+      const parts = [];
+      parts.push(`<span class="font-extrabold text-slate-900">${escapeHtml(v.basisLabel)}</span>`);
+      parts.push(v.cny > 0
+        ? `${escapeHtml(agent)}: ${Math.round(v.cny).toLocaleString('ru-RU')} ¥ / ${formatUSD(v.cnyUsd)}`
+        : escapeHtml(agent));
+      if (v.feeItems && v.feeItems.length) {
+        const list = v.feeItems.map(f => `${escapeHtml(f.label)} ${rubUsd(f.rub, f.usd)}`).join('; ');
+        parts.push(`Доп. расходы: ${list}`);
+      }
+      parts.push(`<span class="font-bold text-slate-900">Итого нетто: ${rubUsd(v.nettoRub, v.nettoUsd)}</span>`);
+      parts.push(`<span class="font-bold text-slate-900">На клиента: ${rubUsd(v.bruttoRub, v.bruttoUsd)}</span>`);
+      if (v.lastMileRub > 0) parts.push(`Довоз: ${rub(v.lastMileRub)}`);
+      return `<div class="leading-relaxed">${parts.join(', ')}</div>`;
+    }
+
+    function syncCalcSlot() {
+      const box = document.getElementById('calc-summary-block');
+      const wrap = document.getElementById('calc-summary-wrap');
+      if (!box || !wrap) return;
+      const btn = document.getElementById('calc-copy-btn');
+      if (btn && !btn._bound) {
+        btn._bound = true;
+        btn.addEventListener('click', async () => {
+          const text = box.innerText.replace(/\s+/g, ' ').trim();
+          const flash = (msg) => {
+            const old = btn.textContent;
+            btn.textContent = msg;
+            setTimeout(() => { btn.textContent = old; }, 1500);
+          };
+          try {
+            await navigator.clipboard.writeText(text);
+            flash('✓ Скопировано');
+          } catch (e) {
+            // Запасной вариант: выделяем текст блока, пользователь копирует сам
+            const sel = window.getSelection();
+            const range = document.createRange();
+            range.selectNodeContents(box);
+            sel.removeAllRanges();
+            sel.addRange(range);
+            try { document.execCommand('copy') ? flash('✓ Скопировано') : flash('Выделено: Ctrl+C'); }
+            catch (e2) { flash('Выделено: Ctrl+C'); }
+          }
+        });
+      }
+      const hasData = !!(kpCalcView && hasCargo());
+      wrap.classList.toggle('hidden', !hasData);
+      if (!hasData) { box.innerHTML = ''; return; }
+      const html = buildCalcSlotHtml(kpCalcView);
+      if (box._kpHtml !== html) { box.innerHTML = html; box._kpHtml = html; }
+    }
+
+    // Удаляет блок из текста КП, если он попал туда раньше
+    function removeCalcFromEmail() {
+      const root = document.getElementById('email-output');
+      if (!root) return;
+      root.querySelectorAll('[data-kp-slot="calc"]').forEach(el => el.remove());
     }
 
     function syncLastmileSlot() {
