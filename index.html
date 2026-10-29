@@ -476,7 +476,7 @@
         h += '<g data-id="' + it.id + '" style="cursor:grab"><rect x="' + it.x + '" y="' + it.y + '" width="' + a + '" height="' + c + '" fill="' + (isBad ? '#fecaca' : COLORS[r.n % 8]) +
              '" stroke="' + (isSel ? '#2563eb' : isBad ? '#dc2626' : '#475569') + '" stroke-width="' + (isSel ? 5 : 2) + '"/>';
         var fs = Math.max(9, Math.min(26, Math.min(a, c) / 4)), cx = it.x + a / 2, cy = it.y + c / 2;
-        var tr = nRaw(it, idx);
+        var tr = nOf(it, idx);
         if (tr > 1) {
           h += '<rect x="' + (it.x + 5) + '" y="' + (it.y + 5) + '" width="' + Math.max(1, a - 10) + '" height="' + Math.max(1, c - 10) + '" fill="none" stroke="#475569" stroke-width="1.5" stroke-dasharray="5 3" style="pointer-events:none"/>';
           var bw = fs * 3.4, bh = fs * 1.35;
@@ -489,6 +489,10 @@
         if (two) { var d = dm(r); h += '<text x="' + cx + '" y="' + (cy + fs * 1.15) + '" font-size="' + fs * 0.75 + '" text-anchor="middle" fill="#334155" style="pointer-events:none">' + Math.round(d.l) + '×' + Math.round(d.w) + '</text>'; }
         h += '</g>';
       });
+      if (drag && drag.piece && drag.moved) {
+        var gi = drag.it, ga2 = ex(gi), gc2 = ey(gi), gr = rowOf(gi.ro), hitG = hit(drag.nx, drag.ny, ga2, gc2, gi.id);
+        h += '<rect x="' + drag.nx + '" y="' + drag.ny + '" width="' + ga2 + '" height="' + gc2 + '" fill="' + (hitG ? '#fecaca' : COLORS[gr.n % 8]) + '" fill-opacity=".7" stroke="#2563eb" stroke-width="4" stroke-dasharray="10 5" style="pointer-events:none"/>';
+      }
       if (xe > 0) h += '<line x1="' + xe + '" y1="-14" x2="' + xe + '" y2="' + (W + 6) + '" stroke="#2563eb" stroke-width="3" stroke-dasharray="9 6"/><text x="' + xe + '" y="-18" font-size="17" font-weight="700" text-anchor="middle" fill="#2563eb">' + (xe / 100).toFixed(2) + ' LDM</text>';
       return h + '</svg>';
     }
@@ -496,7 +500,11 @@
     function tiers(r, idx) { var fp = Math.ceil(r.c / r.s); return (idx < fp || r.c % r.s === 0) ? r.s : r.c % r.s; }
     // Грузов в месте: по раскладке калькулятора (ярусы) или число, заданное после разбивки по одному грузу
     function nRaw(it, idx) { return it.n != null ? it.n : tiers(rowOf(it.ro), idx); }
-    function nOf(it, idx) { var n = nRaw(it, idx); if (pl3Drag && pl3Drag.kind === 'piece' && pl3Drag.src === it) n -= 1; return n; }
+    function nOf(it, idx) {
+      var n = nRaw(it, idx);
+      if ((pl3Drag && pl3Drag.kind === 'piece' && pl3Drag.src === it) || (drag && drag.piece && drag.it === it)) n -= 1;
+      return n;
+    }
     function curN(it) { var q = seqItems().filter(function (x) { return x.it === it; })[0]; return q ? nRaw(q.it, q.idx) : 0; }
     // Перед разбивкой фиксируем число грузов во всех местах (индексы мест могут поменяться)
     function materialize() { seqItems().forEach(function (q) { if (q.it.n == null) q.it.n = tiers(q.r, q.idx); }); }
@@ -511,7 +519,7 @@
       h += '<text x="' + (L - 4) + '" y="-6" font-size="14" text-anchor="end" fill="#dc2626">потолок ' + H + ' см</text>';
       seq.forEach(function (q) {
         var it = q.it, r = q.r, a = ex(it), top = 0, list = [];
-        for (var j = 0; j < nRaw(it, q.idx); j++) list.push(r);
+        for (var j = 0; j < nOf(it, q.idx); j++) list.push(r);
         P.rows.forEach(function (d) { if (d.on === r.id && q.idx <= d.c) list.push(d); });
         list.forEach(function (t) {
           var d = dm(t), th = d.h > 0 ? d.h : 40, y = H - top - th;
@@ -1130,11 +1138,20 @@
       var g = e.target.closest('#pl-svg g[data-id]');
       if (!g) { if (e.target.closest('#pl-svg')) { sel = null; render(); } return; }
       var it = find(+g.getAttribute('data-id')); if (!it) return;
-      sel = it.id; var p = svgPt(e); drag = { it: it, ox: p.x - it.x, oy: p.y - it.y, moved: false };
+      sel = it.id; var p = svgPt(e);
+      if (curN(it) > 1) { materialize(); drag = { it: it, piece: true, ox: p.x - it.x, oy: p.y - it.y, moved: false, nx: it.x, ny: it.y }; }
+      else drag = { it: it, ox: p.x - it.x, oy: p.y - it.y, moved: false };
       e.preventDefault(); render();
     });
     document.addEventListener('pointermove', function (e) {
       if (!drag) return;
+      if (drag.piece) {
+        var pp = svgPt(e), pit = drag.it, pa = ex(pit), pb = ey(pit), pxs = [0, P.sp.l], pys = [0, P.sp.w];
+        P.items.forEach(function (o) { if (o !== pit) { pxs.push(o.x, o.x + ex(o)); pys.push(o.y, o.y + ey(o)); } });
+        drag.nx = Math.max(0, Math.min(mag(pp.x - drag.ox, pa, pxs), P.sp.l - pa));
+        drag.ny = Math.max(0, Math.min(mag(pp.y - drag.oy, pb, pys), P.sp.w - pb));
+        drag.moved = true; render(); return;
+      }
       var p = svgPt(e), it = drag.it, a = ex(it), b = ey(it), xs = [0, P.sp.l], ys = [0, P.sp.w];
       P.items.forEach(function (o) { if (o !== it) { xs.push(o.x, o.x + ex(o)); ys.push(o.y, o.y + ey(o)); } });
       var nx = Math.max(0, mag(p.x - drag.ox, a, xs)), ny = Math.max(0, Math.min(mag(p.y - drag.oy, b, ys), Math.max(0, P.sp.w - b)));
@@ -1144,7 +1161,25 @@
       else if (!hit(it.x, ny, a, b, it.id)) it.y = ny;
       drag.moved = true; render();
     });
-    document.addEventListener('pointerup', function () { if (!drag) return; var m = drag.moved; drag = null; if (m) touch(); });
+    // Верхний груз из места с ярусами: на такой же груз (сверху) или на пол в свободное место
+    function pieceDrop2D(dg) {
+      var src = dg.it, R = rowOf(src.ro), a = ex(src), b = ey(src), cx = dg.nx + a / 2, cy = dg.ny + b / 2;
+      var t = P.items.filter(function (o) {
+        return o !== src && o.ro === src.ro && cx > o.x && cx < o.x + ex(o) && cy > o.y && cy < o.y + ey(o);
+      })[0];
+      src.n = curN(src) - 1;
+      if (t) { t.n = curN(t) + 1; sel = t.id; touch(); return; }
+      var px = dg.nx, py = dg.ny, rot = src.r;
+      if (hit(px, py, a, b, -1)) { var sp = spot(dm(R).l, dm(R).w); px = sp.x; py = sp.y; rot = sp.r; }
+      var ni = { id: nid++, ro: src.ro, x: px, y: py, r: rot, n: 1 };
+      P.items.push(ni); sel = ni.id; touch();
+    }
+    document.addEventListener('pointerup', function () {
+      if (!drag) return;
+      var dg = drag; drag = null;
+      if (dg.piece) { if (dg.moved) pieceDrop2D(dg); else render(); return; }
+      if (dg.moved) touch();
+    });
     document.addEventListener('contextmenu', function (e) {
       if (!isOpen() || !e.target.closest || !e.target.closest('#pl-svg')) return;
       e.preventDefault();
