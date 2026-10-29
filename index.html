@@ -327,8 +327,18 @@
             <span>Груз в калькуляторе изменился после построения плана.</span>
             <button type="button" onclick="plannerAuto()" class="px-3 py-2 bg-white border border-amber-200 rounded-xl font-bold hover:bg-amber-100 shrink-0">Перестроить</button>
           </div>
-          <div class="grid xl:grid-cols-[minmax(0,1fr)_330px] gap-4 items-start"><div class="space-y-4 min-w-0"><div class="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
+          <div class="grid xl:grid-cols-[minmax(0,1fr)_330px] gap-4 items-start"><div class="space-y-4 min-w-0">
+          <div class="inline-flex p-1 rounded-xl bg-slate-100 text-xs font-bold">
+            <button type="button" id="pl-mode-2d" onclick="plModeSet('2d')" class="px-3.5 py-2 rounded-lg bg-white text-blue-700 shadow-sm transition-all">Схема: вид сверху и сбоку</button>
+            <button type="button" id="pl-mode-3d" onclick="plModeSet('3d')" class="px-3.5 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition-all">3D</button>
+          </div>
+          <div class="overflow-x-auto rounded-2xl border border-slate-200 bg-slate-50 p-2">
             <div id="pl-svg-wrap" style="min-width:640px"></div>
+          </div>
+          <div id="pl-3d-wrap" class="hidden relative rounded-2xl border border-slate-200 bg-slate-100 overflow-hidden" style="height:600px">
+            <div id="pl-3d" class="absolute inset-0"></div>
+            <div id="pl-3d-err" class="hidden absolute inset-0 flex items-center justify-center p-6 text-center text-sm font-bold text-rose-600 bg-white/90"></div>
+            <div id="pl-3d-info" class="pointer-events-none absolute left-3 bottom-3 max-w-[90%] rounded-xl bg-white/90 border border-slate-200 px-3 py-2 text-[11px] font-semibold text-slate-600 leading-snug">Перетаскивайте места мышью · ЛКМ по пустому месту — вращать · колесо — масштаб · двойной клик — повернуть</div>
           </div>
           <div id="pl-sel-bar" class="hidden rounded-2xl bg-blue-50 border border-blue-200 p-3 flex items-center justify-between gap-3 text-xs">
             <span id="pl-sel-text" class="font-bold text-blue-900"></span>
@@ -567,7 +577,7 @@
       if (it) { var r = rowOf(it.ro); $('pl-sel-text').textContent = 'Выбрано: №' + r.n + ' · ' + Math.round(ex(it)) + '×' + Math.round(ey(it)) + ' см' + (it.r ? ' (повернуто)' : ''); }
     }
 
-    function render() { $('pl-svg-wrap').innerHTML = svgHtml(false) + '<div style="height:10px"></div>' + sideHtml(false); info(); }
+    function render() { $('pl-svg-wrap').innerHTML = svgHtml(false) + '<div style="height:10px"></div>' + sideHtml(false); info(); pl3Sync(); }
     function hint() {
       var el = $('planner-ldm-hint'); if (!el) return;
       if (!P.items.length) { el.textContent = ''; return; }
@@ -586,12 +596,259 @@
       it.y = y; return true;
     }
 
+    // ---- 3D: тот же план, что и на схеме (three.js подгружается при первом включении) ----
+    var PL3_URL = 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js';
+    var pl3 = null, pl3Loading = null, pl3Mode = '2d', pl3Drag = null;
+
+    function pl3Load() {
+      if (window.THREE) return Promise.resolve();
+      if (pl3Loading) return pl3Loading;
+      pl3Loading = new Promise(function (res, rej) {
+        var s = document.createElement('script');
+        s.src = PL3_URL;
+        s.onload = function () { res(); };
+        s.onerror = function () { pl3Loading = null; rej(new Error('Не удалось загрузить 3D-библиотеку. Проверьте интернет.')); };
+        document.head.appendChild(s);
+      });
+      return pl3Loading;
+    }
+
+    // Места с номерами внутри строки (как на схеме): idx — порядковый номер места этого груза
+    function seqItems() {
+      var cnt = {};
+      return P.items.map(function (it) { var r = rowOf(it.ro); cnt[r.id] = (cnt[r.id] || 0) + 1; return { it: it, r: r, idx: cnt[r.id] }; });
+    }
+    // Ярусы и грузы «на другом» над местом — снизу вверх
+    function stackOf(q) {
+      var list = [], k;
+      for (k = 0; k < tiers(q.r, q.idx); k++) list.push(q.r);
+      P.rows.forEach(function (d) { if (d.on === q.r.id && q.idx <= d.c) list.push(d); });
+      return list.map(function (t) { var d = dm(t); return { r: t, th: d.h > 0 ? d.h : 40 }; });
+    }
+
+    function pl3Init() {
+      var host = $('pl-3d');
+      if (pl3 || !host || !window.THREE) return;
+      var T = THREE, renderer;
+      try { renderer = new T.WebGLRenderer({ antialias: true }); }
+      catch (err) { throw new Error('3D недоступно: браузер не поддерживает WebGL'); }
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setClearColor(0xf1f5f9, 1);
+      var cv = renderer.domElement;
+      cv.style.display = 'block'; cv.style.touchAction = 'none'; cv.style.width = '100%'; cv.style.height = '100%';
+      host.appendChild(cv);
+      var scene = new T.Scene(), camera = new T.PerspectiveCamera(40, 1, 5, 100000), group = new T.Group();
+      scene.add(group);
+      scene.add(new T.AmbientLight(0xffffff, 0.75));
+      var sun = new T.DirectionalLight(0xffffff, 0.7); sun.position.set(600, 2000, 900); scene.add(sun);
+      pl3 = { T: T, renderer: renderer, scene: scene, camera: camera, group: group, host: host, ray: new T.Raycaster(), v: new T.Vector2(), theta: -0.75, phi: 1.0, dist: 2600 };
+      cv.addEventListener('pointerdown', pl3Down);
+      cv.addEventListener('pointermove', pl3Move);
+      cv.addEventListener('pointerup', pl3Up);
+      cv.addEventListener('pointercancel', pl3Up);
+      cv.addEventListener('dblclick', pl3Dbl);
+      cv.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+      cv.addEventListener('wheel', function (e) {
+        e.preventDefault();
+        pl3.dist = Math.max(300, Math.min(20000, pl3.dist * (e.deltaY > 0 ? 1.1 : 0.9)));
+        pl3Draw();
+      }, { passive: false });
+      if (window.ResizeObserver) new ResizeObserver(function () { pl3Resize(); }).observe(host);
+    }
+
+    function pl3Resize() {
+      if (!pl3) return;
+      var w = pl3.host.clientWidth, h = pl3.host.clientHeight;
+      if (!w || !h) return;
+      pl3.renderer.setSize(w, h, false);
+      pl3.camera.aspect = w / h;
+      pl3.camera.updateProjectionMatrix();
+      pl3Draw();
+    }
+
+    function pl3Draw() {
+      if (!pl3) return;
+      var T = pl3.T, cam = pl3.camera, tgt = new T.Vector3(0, TRUCK_HEIGHT_CM * 0.3, 0);
+      var d = pl3.dist, th = pl3.theta, ph = pl3.phi;
+      cam.position.set(tgt.x + d * Math.sin(ph) * Math.sin(th), tgt.y + d * Math.cos(ph), tgt.z + d * Math.sin(ph) * Math.cos(th));
+      cam.lookAt(tgt);
+      pl3.renderer.render(pl3.scene, cam);
+    }
+
+    // Перестроить сцену из P: кузов, пол, кабина, места с ярусами и штабелями
+    function pl3Build() {
+      if (!pl3) return;
+      var T = pl3.T, g = pl3.group, L = P.sp.l, W = P.sp.w, H = TRUCK_HEIGHT_CM, b = bad(), seq = seqItems();
+      while (g.children.length) g.remove(g.children[0]);
+      function edges(geom, col, x, y, z) {
+        var l = new T.LineSegments(new T.EdgesGeometry(geom), new T.LineBasicMaterial({ color: col }));
+        l.position.set(x, y, z); g.add(l);
+      }
+      var floor = new T.Mesh(new T.PlaneGeometry(L, W), new T.MeshStandardMaterial({ color: 0xf8fafc, roughness: 1 }));
+      floor.rotation.x = -Math.PI / 2; floor.position.set(0, 0.5, 0); g.add(floor);
+      edges(new T.BoxGeometry(L, H, W), 0x475569, 0, H / 2, 0);
+      var cab = new T.Mesh(new T.BoxGeometry(60, 220, W * 0.8), new T.MeshStandardMaterial({ color: 0xcbd5e1 }));
+      cab.position.set(-L / 2 - 38, 110, 0); g.add(cab);
+      // сетка по метрам
+      var pts = [];
+      for (var m = 100; m < L; m += 100) pts.push(m - L / 2, 0.8, -W / 2, m - L / 2, 0.8, W / 2);
+      if (pts.length) {
+        var gg = new T.BufferGeometry();
+        gg.setAttribute('position', new T.Float32BufferAttribute(pts, 3));
+        g.add(new T.LineSegments(gg, new T.LineBasicMaterial({ color: 0xcbd5e1 })));
+      }
+      seq.forEach(function (q) {
+        var it = q.it, a = ex(it), c = ey(it), top = 0, isBad = !!b[it.id], isSel = sel === it.id;
+        stackOf(q).forEach(function (s) {
+          var geom = new T.BoxGeometry(a, s.th, c);
+          var fillHex = isBad ? 0xfecaca : new T.Color(COLORS[s.r.n % 8]).getHex();
+          var mat = new T.MeshStandardMaterial({ color: fillHex, roughness: 0.6, emissive: isSel ? 0x1e40af : 0x000000, emissiveIntensity: isSel ? 0.35 : 0 });
+          var mesh = new T.Mesh(geom, mat);
+          mesh.position.set(it.x + a / 2 - L / 2, top + s.th / 2, it.y + c / 2 - W / 2);
+          mesh.userData.id = it.id;
+          g.add(mesh);
+          var over = top + s.th > H + 0.5;
+          var lineCol = (isBad || over) ? 0xdc2626 : (isSel ? 0x2563eb : 0x334155);
+          edges(geom, lineCol, mesh.position.x, mesh.position.y, mesh.position.z);
+          top += s.th;
+        });
+      });
+      pl3Draw();
+    }
+
+    function pl3Sync() { if (pl3 && pl3Mode === '3d') pl3Build(); }
+
+    function pl3Ray(e) {
+      var cv = pl3.renderer.domElement, rc = cv.getBoundingClientRect();
+      pl3.v.set(((e.clientX - rc.left) / rc.width) * 2 - 1, -((e.clientY - rc.top) / rc.height) * 2 + 1);
+      pl3.ray.setFromCamera(pl3.v, pl3.camera);
+    }
+    function pl3Pick(e) {
+      pl3Ray(e);
+      var hits = pl3.ray.intersectObjects(pl3.group.children, false).filter(function (h) { return h.object.userData.id != null; });
+      return hits.length ? hits[0].object.userData.id : null;
+    }
+    // Точка на полу в координатах плана (x — вдоль кузова, y — ширина)
+    function pl3Floor(e) {
+      pl3Ray(e);
+      var pt = new pl3.T.Vector3();
+      if (!pl3.ray.ray.intersectPlane(new pl3.T.Plane(new pl3.T.Vector3(0, 1, 0), 0), pt)) return null;
+      return { x: pt.x + P.sp.l / 2, y: pt.z + P.sp.w / 2 };
+    }
+
+    function pl3Down(e) {
+      if (!pl3 || e.button !== 0) return;
+      var id = pl3Pick(e);
+      pl3.renderer.domElement.setPointerCapture(e.pointerId);
+      if (id != null) {
+        var it = find(id);
+        if (!it) return;
+        var fp = pl3Floor(e);
+        sel = id;
+        pl3Drag = { it: it, ox: fp ? fp.x - it.x : 0, oy: fp ? fp.y - it.y : 0, moved: false };
+        pl3Build();
+      } else {
+        sel = null;
+        pl3Drag = { orbit: true, lx: e.clientX, ly: e.clientY };
+        pl3Build();
+      }
+    }
+
+    function pl3Move(e) {
+      if (!pl3) return;
+      var d = pl3Drag;
+      if (!d) {
+        var id = pl3Pick(e);
+        pl3.renderer.domElement.style.cursor = id != null ? 'grab' : 'default';
+        pl3Hover(id);
+        return;
+      }
+      if (d.orbit) {
+        pl3.theta -= (e.clientX - d.lx) * 0.008;
+        pl3.phi = Math.max(0.15, Math.min(1.5, pl3.phi - (e.clientY - d.ly) * 0.008));
+        d.lx = e.clientX; d.ly = e.clientY;
+        pl3Draw();
+        return;
+      }
+      var fp = pl3Floor(e);
+      if (!fp) return;
+      var it = d.it, a = ex(it), b = ey(it), L = P.sp.l, W = P.sp.w;
+      var xs = [0, L], ys = [0, W];
+      P.items.forEach(function (o) { if (o !== it) { xs.push(o.x, o.x + ex(o)); ys.push(o.y, o.y + ey(o)); } });
+      var nx = Math.max(0, mag(fp.x - d.ox, a, xs)), ny = Math.max(0, Math.min(mag(fp.y - d.oy, b, ys), Math.max(0, W - b)));
+      // Пересекаться нельзя: если позиция занята, сдвигаем по одной оси, иначе остаемся
+      if (!hit(nx, ny, a, b, it.id)) { it.x = nx; it.y = ny; }
+      else if (!hit(nx, it.y, a, b, it.id)) it.x = nx;
+      else if (!hit(it.x, ny, a, b, it.id)) it.y = ny;
+      d.moved = true;
+      pl3Build();
+      pl3Hover(it.id);
+    }
+
+    function pl3Up() {
+      var d = pl3Drag;
+      pl3Drag = null;
+      if (d && !d.orbit && d.moved) touch();
+      else if (d && !d.orbit) { info(); }
+    }
+
+    function pl3Dbl(e) {
+      var id = pl3Pick(e);
+      if (id == null) return;
+      sel = id;
+      var it = find(id);
+      if (it && rotate(it)) touch();
+    }
+
+    function pl3Hover(id) {
+      var el = $('pl-3d-info');
+      if (!el) return;
+      var it = id != null ? find(id) : null;
+      if (!it) {
+        el.textContent = 'Перетаскивайте места мышью · ЛКМ по пустому месту — вращать · колесо — масштаб · двойной клик — повернуть';
+        return;
+      }
+      var r = rowOf(it.ro), q = seqItems().filter(function (x) { return x.it === it; })[0];
+      var h = q ? stackOf(q).reduce(function (a, s) { return a + s.th; }, 0) : 0;
+      el.textContent = '№' + r.n + ' · ' + Math.round(ex(it)) + '×' + Math.round(ey(it)) + ' см' + (it.r ? ' (повернуто)' : '') +
+        ' · высота ' + Math.round(h) + ' см · от кабины ' + Math.round(it.x) + ' см';
+    }
+
+    function pl3SetMode(m) {
+      pl3Mode = m === '3d' ? '3d' : '2d';
+      var is3 = pl3Mode === '3d';
+      $('pl-svg-wrap').parentNode.classList.toggle('hidden', is3);
+      $('pl-3d-wrap').classList.toggle('hidden', !is3);
+      var on = 'px-3.5 py-2 rounded-lg bg-white text-blue-700 shadow-sm transition-all', off = 'px-3.5 py-2 rounded-lg text-slate-500 hover:text-slate-800 transition-all';
+      $('pl-mode-2d').className = is3 ? off : on;
+      $('pl-mode-3d').className = is3 ? on : off;
+      if (!is3) { render(); return; }
+      pl3Load().then(function () {
+        try { pl3Init(); }
+        catch (err) {
+          var er = $('pl-3d-err');
+          if (er) { er.textContent = err.message; er.classList.remove('hidden'); }
+          return;
+        }
+        pl3.dist = Math.max(900, P.sp.l * 1.15);
+        requestAnimationFrame(function () { pl3Resize(); pl3Build(); });
+      }).catch(function (err) {
+        pl3Mode = '2d';
+        showToast(err.message, true);
+        $('pl-svg-wrap').parentNode.classList.remove('hidden');
+        $('pl-3d-wrap').classList.add('hidden');
+        $('pl-mode-2d').className = on; $('pl-mode-3d').className = off;
+      });
+    }
+    window.plModeSet = pl3SetMode;
+
     window.openPlanner = function () {
       $('pl-modal').classList.remove('hidden'); document.body.style.overflow = 'hidden';
       var n = typeof getSessionNumber === 'function' ? getSessionNumber() : '';
       $('pl-title').textContent = 'Расчет' + (n ? ' № ' + n : '') + (state.selectedCity ? ' · ' + state.selectedCity : '');
       if ((!P.items.length && foot().length) || P.sig !== sig()) autoPlace();
       spaceUi(); render(); tbl(); hint();
+      if (pl3Mode === '3d') pl3SetMode('3d');
     };
     window.closePlanner = function () { $('pl-modal').classList.add('hidden'); document.body.style.overflow = ''; drag = null; };
     window.plannerAuto = function () {
@@ -620,6 +877,7 @@
     };
     window.plannerSave = function () { if (typeof saveCurrentCalculation === 'function') saveCurrentCalculation(false); };
     window.plannerPrint = function () {
+      if (pl3Mode === '3d') pl3SetMode('2d');
       if (!P.items.length) { showToast('План пуст', true); return; }
       var w = window.open('', '_blank'); if (!w) { showToast('Браузер заблокировал окно печати', true); return; }
       var n = typeof getSessionNumber === 'function' ? getSessionNumber() : '';
