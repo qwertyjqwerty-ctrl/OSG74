@@ -408,7 +408,7 @@
       var man = P.rows.filter(function (r) { return r.k < 0; });
       var calc = foot().map(function (f) {
         var o = old[f.k];
-        return { id: o ? o.id : nid++, k: f.k, n: f.k + 1, l: f.l, w: f.w, h: f.h, c: f.c, s: f.s, t: o ? o.t : 0, on: o ? o.on : null };
+        return { id: o ? o.id : nid++, k: f.k, n: f.k + 1, l: f.l, w: f.w, h: f.h, c: f.c, s: f.s, t: o ? o.t : 0, on: o ? o.on : null, out: o ? o.out : 0 };
       });
       P.rows = calc.concat(man);
       P.rows.forEach(function (r) { if (r.on && !rowOf(r.on)) r.on = null; });
@@ -443,7 +443,7 @@
     }
     function autoPlace() {
       syncRows(); P.items = [];
-      P.rows.filter(function (r) { return !r.on; }).sort(function (a, b) {
+      P.rows.filter(function (r) { return !r.on && !r.out; }).sort(function (a, b) {
         var da = dm(a), db = dm(b);
         return Math.max(db.l, db.w) - Math.max(da.l, da.w) || Math.min(db.l, db.w) - Math.min(da.l, da.w);
       }).forEach(put);
@@ -618,12 +618,51 @@
       var cnt = {};
       return P.items.map(function (it) { var r = rowOf(it.ro); cnt[r.id] = (cnt[r.id] || 0) + 1; return { it: it, r: r, idx: cnt[r.id] }; });
     }
-    // Ярусы и грузы «на другом» над местом — снизу вверх
+    // Ярусы и грузы «на другом» над местом — снизу вверх: [{r, th}]
     function stackOf(q) {
       var list = [], k;
       for (k = 0; k < tiers(q.r, q.idx); k++) list.push(q.r);
       P.rows.forEach(function (d) { if (d.on === q.r.id && q.idx <= d.c) list.push(d); });
       return list.map(function (t) { var d = dm(t); return { r: t, th: d.h > 0 ? d.h : 40 }; });
+    }
+    function outCount() {
+      var n = 0;
+      P.rows.forEach(function (r) { if (r.out && !r.on) n += Math.max(0, Math.floor(r.c) || 0); });
+      return n;
+    }
+
+    // ---- Изменения плана из 3D ----
+    // Груз вынут из кузова: строка и грузы на ней уходят в зону «вне кузова», места на полу удаляются
+    function sendOut(R) {
+      R.on = null;
+      var queue = [R];
+      while (queue.length) {
+        var q = queue.shift();
+        q.out = 1;
+        P.items = P.items.filter(function (i) { return i.ro !== q.id; });
+        P.rows.forEach(function (d) { if (d.on === q.id && !d.out) queue.push(d); });
+      }
+    }
+    // Груз поставлен сверху на другой груз (строка T): R стоит на T, на пол не занимает место
+    function stackOnto(R, targetId) {
+      var t = rowOf(targetId);
+      if (!t || t === R) return false;
+      for (var c = t, guard = 0; c && guard < 50; guard++) { if (c === R) return false; c = c.on ? rowOf(c.on) : null; }
+      R.on = t.id; R.out = 0;
+      P.items = P.items.filter(function (i) { return i.ro !== R.id; });
+      P.rows.forEach(function (d) { if (d.on === R.id) d.out = 0; });
+      return true;
+    }
+    // Груз поставлен на пол в точке (x, y): первое место — в точку, остальные — по свободному месту
+    function placeAt(R, x, y) {
+      R.on = null; R.out = 0;
+      P.rows.forEach(function (d) { if (d.on === R.id) d.out = 0; });
+      var d = dm(R), fp = Math.min(300, Math.ceil(R.c / R.s)), a = d.l, b = d.w;
+      P.items = P.items.filter(function (i) { return i.ro !== R.id; });
+      for (var i = 0; i < fp; i++) {
+        var s = (i === 0 && !hit(x, y, a, b, 0)) ? { x: x, y: y, r: 0 } : spot(d.l, d.w);
+        P.items.push({ id: nid++, ro: R.id, x: s.x, y: s.y, r: s.r });
+      }
     }
 
     function pl3Init() {
@@ -675,7 +714,7 @@
       pl3.renderer.render(pl3.scene, cam);
     }
 
-    // Перестроить сцену из P: кузов, пол, кабина, места с ярусами и штабелями
+    // Перестроить сцену из P: кузов, пол, кабина, места с ярусами и штабелями, зона «вне кузова»
     function pl3Build() {
       if (!pl3) return;
       var T = pl3.T, g = pl3.group, L = P.sp.l, W = P.sp.w, H = TRUCK_HEIGHT_CM, b = bad(), seq = seqItems();
@@ -689,7 +728,6 @@
       edges(new T.BoxGeometry(L, H, W), 0x475569, 0, H / 2, 0);
       var cab = new T.Mesh(new T.BoxGeometry(60, 220, W * 0.8), new T.MeshStandardMaterial({ color: 0xcbd5e1 }));
       cab.position.set(-L / 2 - 38, 110, 0); g.add(cab);
-      // сетка по метрам
       var pts = [];
       for (var m = 100; m < L; m += 100) pts.push(m - L / 2, 0.8, -W / 2, m - L / 2, 0.8, W / 2);
       if (pts.length) {
@@ -697,6 +735,7 @@
         gg.setAttribute('position', new T.Float32BufferAttribute(pts, 3));
         g.add(new T.LineSegments(gg, new T.LineBasicMaterial({ color: 0xcbd5e1 })));
       }
+      // Места в кузове
       seq.forEach(function (q) {
         var it = q.it, a = ex(it), c = ey(it), top = 0, isBad = !!b[it.id], isSel = sel === it.id;
         stackOf(q).forEach(function (s) {
@@ -705,13 +744,32 @@
           var mat = new T.MeshStandardMaterial({ color: fillHex, roughness: 0.6, emissive: isSel ? 0x1e40af : 0x000000, emissiveIntensity: isSel ? 0.35 : 0 });
           var mesh = new T.Mesh(geom, mat);
           mesh.position.set(it.x + a / 2 - L / 2, top + s.th / 2, it.y + c / 2 - W / 2);
-          mesh.userData.id = it.id;
+          mesh.userData = { id: it.id, row: s.r.id, stacked: s.r !== q.r };
           g.add(mesh);
           var over = top + s.th > H + 0.5;
-          var lineCol = (isBad || over) ? 0xdc2626 : (isSel ? 0x2563eb : 0x334155);
-          edges(geom, lineCol, mesh.position.x, mesh.position.y, mesh.position.z);
+          edges(geom, (isBad || over) ? 0xdc2626 : (isSel ? 0x2563eb : 0x334155), mesh.position.x, mesh.position.y, mesh.position.z);
           top += s.th;
         });
+      });
+      // Зона «вне кузова» — за задней стенкой, грузы стоят на полу полупрозрачно
+      var cursor = L + 150;
+      P.rows.forEach(function (R) {
+        if (!R.out || R.on) return;
+        var d = dm(R), a = d.l, c = d.w;
+        for (var k = 1; k <= R.c; k++) {
+          var top2 = 0;
+          stackOf({ r: R, idx: k }).forEach(function (s) {
+            var geom = new T.BoxGeometry(a, s.th, c);
+            var mat = new T.MeshStandardMaterial({ color: new T.Color(COLORS[s.r.n % 8]).getHex(), roughness: 0.6, transparent: true, opacity: 0.85 });
+            var mesh = new T.Mesh(geom, mat);
+            mesh.position.set(cursor + a / 2 - L / 2, top2 + s.th / 2, c / 2 - W / 2);
+            mesh.userData = { out: R.id, row: R.id };
+            g.add(mesh);
+            edges(geom, 0x64748b, mesh.position.x, mesh.position.y, mesh.position.z);
+            top2 += s.th;
+          });
+          cursor += a + 15;
+        }
       });
       pl3Draw();
     }
@@ -723,10 +781,14 @@
       pl3.v.set(((e.clientX - rc.left) / rc.width) * 2 - 1, -((e.clientY - rc.top) / rc.height) * 2 + 1);
       pl3.ray.setFromCamera(pl3.v, pl3.camera);
     }
-    function pl3Pick(e) {
+    // Первый груз под курсором (данные места); exclRow — строка, которую тащим, ее не считаем
+    function pl3Hit(e, exclRow) {
       pl3Ray(e);
-      var hits = pl3.ray.intersectObjects(pl3.group.children, false).filter(function (h) { return h.object.userData.id != null; });
-      return hits.length ? hits[0].object.userData.id : null;
+      var hits = pl3.ray.intersectObjects(pl3.group.children, false).filter(function (h) {
+        var u = h.object.userData;
+        return u && u.row != null && (exclRow == null || u.row !== exclRow);
+      });
+      return hits.length ? hits[0].object.userData : null;
     }
     // Точка на полу в координатах плана (x — вдоль кузова, y — ширина)
     function pl3Floor(e) {
@@ -735,77 +797,148 @@
       if (!pl3.ray.ray.intersectPlane(new pl3.T.Plane(new pl3.T.Vector3(0, 1, 0), 0), pt)) return null;
       return { x: pt.x + P.sp.l / 2, y: pt.z + P.sp.w / 2 };
     }
+    function pl3Msg(text) { var el = $('pl-3d-info'); if (el) el.textContent = text; }
 
     function pl3Down(e) {
       if (!pl3 || e.button !== 0) return;
-      var id = pl3Pick(e);
+      var ud = pl3Hit(e);
       pl3.renderer.domElement.setPointerCapture(e.pointerId);
-      if (id != null) {
-        var it = find(id);
-        if (!it) return;
-        var fp = pl3Floor(e);
-        sel = id;
-        pl3Drag = { it: it, ox: fp ? fp.x - it.x : 0, oy: fp ? fp.y - it.y : 0, moved: false };
-        pl3Build();
-      } else {
+      var fp = pl3Floor(e);
+      if (ud && ud.out != null) {
+        var Ro = rowOf(ud.out);
+        if (!Ro) return;
         sel = null;
-        pl3Drag = { orbit: true, lx: e.clientX, ly: e.clientY };
+        pl3Drag = { kind: 'out', row: Ro, sx: e.clientX, sy: e.clientY, moved: false };
         pl3Build();
+        return;
       }
+      if (ud && ud.id != null) {
+        var it = find(ud.id);
+        if (!it) return;
+        sel = it.id;
+        if (ud.stacked) {
+          pl3Drag = { kind: 'stack', row: rowOf(ud.row), sx: e.clientX, sy: e.clientY, moved: false };
+        } else {
+          pl3Drag = { kind: 'item', it: it, row: rowOf(it.ro), ox: fp ? fp.x - it.x : 0, oy: fp ? fp.y - it.y : 0, sx: e.clientX, sy: e.clientY, moved: false, out: false };
+        }
+        pl3Build();
+        return;
+      }
+      sel = null;
+      pl3Drag = { kind: 'orbit', lx: e.clientX, ly: e.clientY };
+      pl3Build();
     }
 
     function pl3Move(e) {
       if (!pl3) return;
       var d = pl3Drag;
       if (!d) {
-        var id = pl3Pick(e);
-        pl3.renderer.domElement.style.cursor = id != null ? 'grab' : 'default';
-        pl3Hover(id);
+        var ud = pl3Hit(e);
+        pl3.renderer.domElement.style.cursor = ud ? 'grab' : 'default';
+        pl3Hover(ud);
         return;
       }
-      if (d.orbit) {
+      if (d.kind === 'orbit') {
         pl3.theta -= (e.clientX - d.lx) * 0.008;
         pl3.phi = Math.max(0.15, Math.min(1.5, pl3.phi - (e.clientY - d.ly) * 0.008));
         d.lx = e.clientX; d.ly = e.clientY;
         pl3Draw();
         return;
       }
+      if (!d.moved && Math.abs(e.clientX - d.sx) + Math.abs(e.clientY - d.sy) > 5) d.moved = true;
+      if (!d.moved) return;
       var fp = pl3Floor(e);
       if (!fp) return;
-      var it = d.it, a = ex(it), b = ey(it), L = P.sp.l, W = P.sp.w;
-      var xs = [0, L], ys = [0, W];
-      P.items.forEach(function (o) { if (o !== it) { xs.push(o.x, o.x + ex(o)); ys.push(o.y, o.y + ey(o)); } });
-      var nx = Math.max(0, mag(fp.x - d.ox, a, xs)), ny = Math.max(0, Math.min(mag(fp.y - d.oy, b, ys), Math.max(0, W - b)));
-      // Пересекаться нельзя: если позиция занята, сдвигаем по одной оси, иначе остаемся
-      if (!hit(nx, ny, a, b, it.id)) { it.x = nx; it.y = ny; }
-      else if (!hit(nx, it.y, a, b, it.id)) it.x = nx;
-      else if (!hit(it.x, ny, a, b, it.id)) it.y = ny;
-      d.moved = true;
-      pl3Build();
-      pl3Hover(it.id);
+      var L = P.sp.l, W = P.sp.w;
+      var inside = fp.x >= 0 && fp.x <= L && fp.y >= 0 && fp.y <= W;
+      if (d.kind === 'item') {
+        var over = pl3Hit(e, d.row.id);
+        var outside = !(over && over.out == null) && (fp.x < -15 || fp.x > L + 15 || fp.y < -15 || fp.y > W + 15);
+        d.out = outside;
+        if (outside) { pl3Msg('Отпустите, чтобы вынуть груз из кузова'); return; }
+        var it = d.it, a = ex(it), b = ey(it), xs = [0, L], ys = [0, W];
+        P.items.forEach(function (o) { if (o !== it) { xs.push(o.x, o.x + ex(o)); ys.push(o.y, o.y + ey(o)); } });
+        // Задняя стенка и боковые — жесткие границы кузова
+        var nx = Math.max(0, Math.min(mag(fp.x - d.ox, a, xs), L - a)), ny = Math.max(0, Math.min(mag(fp.y - d.oy, b, ys), W - b));
+        // Пересекаться нельзя: если позиция занята, сдвигаем по одной оси, иначе остаемся
+        if (!hit(nx, ny, a, b, it.id)) { it.x = nx; it.y = ny; }
+        else if (!hit(nx, it.y, a, b, it.id)) it.x = nx;
+        else if (!hit(it.x, ny, a, b, it.id)) it.y = ny;
+        pl3Build();
+        pl3Hover({ id: it.id, row: it.ro });
+        return;
+      }
+      if (d.kind === 'stack') {
+        if (!inside) pl3Msg('Отпустите, чтобы вынуть груз из кузова');
+        else pl3Msg('Отпустите на другой груз — встанет сверху · на пол — снимется со штабеля');
+        return;
+      }
+      if (d.kind === 'out') {
+        if (inside) pl3Msg('Отпустите в кузове — груз встанет на пол');
+        else pl3Msg('Перетащите внутрь кузова, чтобы поставить груз');
+      }
     }
 
-    function pl3Up() {
+    function pl3Up(e) {
       var d = pl3Drag;
       pl3Drag = null;
-      if (d && !d.orbit && d.moved) touch();
-      else if (d && !d.orbit) { info(); }
+      if (!d || d.kind === 'orbit') return;
+      pl3Hover(null);
+      if (!d.moved) { pl3Build(); return; }
+      var L = P.sp.l, W = P.sp.w;
+      var pt = pl3Floor(e);
+      var inside = !!pt && pt.x >= 0 && pt.x <= L && pt.y >= 0 && pt.y <= W;
+      var R = d.row;
+      if (!R) return;
+      // Цель — груз под курсором (кроме того, что тащим): ставим сверху
+      var tg = pl3Hit(e, R.id);
+      var onTruck = !!tg && tg.out == null;
+      if (d.kind === 'item') {
+        if (onTruck) { stackOnto(R, tg.row); touch(); return; }
+        if (d.out) { sendOut(R); touch(); return; }
+        touch();
+        return;
+      }
+      if (d.kind === 'stack') {
+        if (onTruck && stackOnto(R, tg.row)) { touch(); return; }
+        if (!inside) { sendOut(R); touch(); return; }
+        var dd = dm(R);
+        placeAt(R,
+          Math.max(0, Math.min(pt.x - dd.l / 2, L - dd.l)),
+          Math.max(0, Math.min(pt.y - dd.w / 2, W - dd.w)));
+        touch();
+        return;
+      }
+      if (d.kind === 'out') {
+        if (!inside) { pl3Build(); pl3Hover(null); return; }
+        var de = dm(R);
+        placeAt(R,
+          Math.max(0, Math.min(pt.x - de.l / 2, L - de.l)),
+          Math.max(0, Math.min(pt.y - de.w / 2, W - de.w)));
+        touch();
+      }
     }
 
     function pl3Dbl(e) {
-      var id = pl3Pick(e);
-      if (id == null) return;
-      sel = id;
-      var it = find(id);
+      var ud = pl3Hit(e);
+      if (!ud || ud.id == null) return;
+      sel = ud.id;
+      var it = find(ud.id);
       if (it && rotate(it)) touch();
     }
 
-    function pl3Hover(id) {
+    function pl3Hover(ud) {
       var el = $('pl-3d-info');
       if (!el) return;
-      var it = id != null ? find(id) : null;
+      if (ud && ud.out != null) {
+        var Ro = rowOf(ud.out);
+        el.textContent = Ro ? '№' + Ro.n + ' вне кузова · перетащите внутрь, чтобы поставить' : '';
+        return;
+      }
+      var it = ud && ud.id != null ? find(ud.id) : null;
       if (!it) {
-        el.textContent = 'Перетаскивайте места мышью · ЛКМ по пустому месту — вращать · колесо — масштаб · двойной клик — повернуть';
+        var out = outCount();
+        el.textContent = (out ? 'Вне кузова: ' + out + ' мест · ' : '') + 'Перетаскивайте места мышью · ЛКМ по пустому месту — вращать · колесо — масштаб · двойной клик — повернуть · тяните за пределы кузова, чтобы вынуть груз';
         return;
       }
       var r = rowOf(it.ro), q = seqItems().filter(function (x) { return x.it === it; })[0];
@@ -889,9 +1022,9 @@
     };
 
     window.plannerSnapshot = function () {
-      if (!P.items.length) return null;
+      if (!P.items.length && !P.rows.length) return null;
       return { sp: { p: P.sp.p, l: P.sp.l, w: P.sp.w }, sig: P.sig,
-        rows: P.rows.map(function (r) { return { id: r.id, k: r.k, n: r.n, l: r.l, w: r.w, h: r.h, c: r.c, s: r.s, t: r.t ? 1 : 0, on: r.on || null }; }),
+        rows: P.rows.map(function (r) { return { id: r.id, k: r.k, n: r.n, l: r.l, w: r.w, h: r.h, c: r.c, s: r.s, t: r.t ? 1 : 0, out: r.out ? 1 : 0, on: r.on || null }; }),
         items: P.items.map(function (i) { return { id: i.id, ro: i.ro, x: r1(i.x), y: r1(i.y), r: i.r ? 1 : 0 }; }) };
     };
     window.plannerRestore = function (d) {
@@ -902,7 +1035,7 @@
         P.sig = String(d.sig || '');
         P.rows = d.rows.map(function (r) {
           var id = Math.floor(num(r.id, 0)) || nid; nid = Math.max(nid, id + 1);
-          return { id: id, k: Math.floor(num(r.k, -1)), n: Math.floor(num(r.n, 1)), l: num(r.l, 0), w: num(r.w, 0), h: num(r.h, 0), c: Math.max(1, Math.floor(num(r.c, 1))), s: Math.max(1, Math.floor(num(r.s, 1))), t: r.t ? 1 : 0, on: r.on ? Math.floor(num(r.on, 0)) : null };
+          return { id: id, k: Math.floor(num(r.k, -1)), n: Math.floor(num(r.n, 1)), l: num(r.l, 0), w: num(r.w, 0), h: num(r.h, 0), c: Math.max(1, Math.floor(num(r.c, 1))), s: Math.max(1, Math.floor(num(r.s, 1))), t: r.t ? 1 : 0, out: r.out ? 1 : 0, on: r.on ? Math.floor(num(r.on, 0)) : null };
         }).filter(function (r) { return r.l > 0 && r.w > 0; });
         P.items = d.items.map(function (i) {
           var id = Math.floor(num(i.id, 0)) || nid; nid = Math.max(nid, id + 1);
