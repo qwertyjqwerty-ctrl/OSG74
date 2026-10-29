@@ -63,6 +63,17 @@
       display: none !important;
     }
     #additional-td-input::-webkit-outer-spin-button, #additional-td-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+    /* Вкладки на широком экране: вертикальное меню слева, остается на месте при прокрутке */
+    @media (min-width: 1024px) {
+      body { padding-left: 16.5rem; }
+      .nav-tabs { position: fixed !important; top: 6.5rem; left: 1rem; width: 14rem !important; max-width: none !important; margin: 0 !important; padding: 0 !important; z-index: 30; }
+      .nav-tabs > div { flex-direction: column !important; border-bottom: none !important; gap: 0.25rem; }
+      .nav-tabs button { width: 100%; justify-content: flex-start; border-bottom-width: 0 !important; border-left: 4px solid transparent !important; border-radius: 0.75rem !important; padding-left: 1rem !important; }
+      .nav-tabs button.text-blue-600 { border-left-color: #2563eb !important; }
+      .nav-tabs .space-x-2 > * + * { margin-left: 0 !important; }
+      .nav-tabs #history-count-badge { margin-left: auto; }
+    }
   </style>
 </head>
 <body class="text-slate-800 min-h-screen pb-16">
