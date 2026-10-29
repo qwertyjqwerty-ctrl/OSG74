@@ -74,6 +74,14 @@
       .nav-tabs .space-x-2 > * + * { margin-left: 0 !important; }
       .nav-tabs #history-count-badge { margin-left: auto; }
     }
+
+    /* Вкладки на телефоне и планшете: закреплены под шапкой при прокрутке, при нехватке ширины листаются */
+    @media (max-width: 1023px) {
+      .nav-tabs { position: sticky !important; top: 80px; z-index: 30; margin-top: 0.75rem !important; padding-top: 0.25rem; padding-bottom: 0.25rem; background: rgba(248, 250, 252, 0.92); backdrop-filter: blur(8px); }
+      .nav-tabs > div { overflow-x: auto; scrollbar-width: none; }
+      .nav-tabs > div::-webkit-scrollbar { display: none; }
+      .nav-tabs button { white-space: nowrap; flex-shrink: 0; }
+    }
   </style>
 </head>
 <body class="text-slate-800 min-h-screen pb-16">
